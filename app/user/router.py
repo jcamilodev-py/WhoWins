@@ -15,17 +15,17 @@ async def get_by_id(id: UUID, db: DBSession, _admin: RequireRoleAdmin):
     return await user_service.find_by_id(db, id)
 
 
-@router.get("/{email}", response_model=UserResponse)
+@router.get("/email/{email}", response_model=UserResponse)
 async def get_by_email(db: DBSession, email: str, _admin: RequireRoleAdmin):
     return await user_service.find_by_email(db, email)
 
 
-@router.get("/{google_id}", response_model=UserResponse)
+@router.get("/google_id/{google_id}", response_model=UserResponse)
 async def get_by_google_id(db: DBSession, google_id: str, _admin: RequireRoleAdmin):
     return await user_service.find_by_google_id(db, google_id)
 
 
-@router.get("/{reset_token}", response_model=UserResponse)
+@router.get("/reset_token/{reset_token}", response_model=UserResponse)
 async def get_by_reset_token(db: DBSession, reset_token: str, _admin: RequireRoleAdmin):
     return await user_service.find_by_reset_token(db, reset_token)
 
