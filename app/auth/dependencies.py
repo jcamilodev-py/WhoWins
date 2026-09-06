@@ -23,26 +23,25 @@ def _extract_token(request: Request, token_from_header: str | None) -> str | Non
 
 
 async def get_current_user(request: Request, db: DBSession, token_from_header: str | None = Depends(oauth2_scheme)) -> User | None:
-
     token = _extract_token(request, token_from_header)
     if not token:
-        return 
+        return None
 
     try:
         payload = decode_token(token)
     except jwt.PyJWTError:
-        return 
+        return None
 
     email = payload.get("sub")
     if not email or payload.get("type") != "access":
-        return 
+        return None
 
     user = await user_repository.find_by_email(db, email)
     if not user or not user.active:
-        return 
+        return None
 
     if payload.get("tv", 0) != user.token_version:
-        return 
+        return None
 
     return user
 
