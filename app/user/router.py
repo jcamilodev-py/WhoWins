@@ -10,9 +10,9 @@ from app.user import service as user_service
 router = APIRouter(prefix="/api/v1/users", tags=["users"])
 
 
-@router.get("/{id}", response_model=UserResponse)
-async def get_by_id(id: UUID, db: DBSession, _admin: RequireRoleAdmin):
-    return await user_service.find_by_id(db, id)
+@router.get("/{user_id}", response_model=UserResponse)
+async def get_by_id(user_id: UUID, db: DBSession, _admin: RequireRoleAdmin):
+    return await user_service.find_by_id(db, user_id)
 
 
 @router.get("/email/{email}", response_model=UserResponse)
@@ -23,11 +23,6 @@ async def get_by_email(db: DBSession, email: str, _admin: RequireRoleAdmin):
 @router.get("/google_id/{google_id}", response_model=UserResponse)
 async def get_by_google_id(db: DBSession, google_id: str, _admin: RequireRoleAdmin):
     return await user_service.find_by_google_id(db, google_id)
-
-
-@router.get("/reset_token/{reset_token}", response_model=UserResponse)
-async def get_by_reset_token(db: DBSession, reset_token: str, _admin: RequireRoleAdmin):
-    return await user_service.find_by_reset_token(db, reset_token)
 
 
 @router.get("/exists/{email}", response_model=bool)
