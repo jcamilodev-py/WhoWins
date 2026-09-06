@@ -10,9 +10,14 @@ engine = create_async_engine(settings.database_url)
 
 AsyncSessionLocal = async_sessionmaker(engine, expire_on_commit=False)
 
+
 async def get_db() -> AsyncGenerator[AsyncSession, None]:
     async with AsyncSessionLocal() as session:
-        yield session
+        try:
+            yield session
+        except Exception:
+            await session.rollback()
+            raise
 
 
 DBSession = Annotated[AsyncSession, Depends(get_db)]
