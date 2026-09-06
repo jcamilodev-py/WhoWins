@@ -4,7 +4,7 @@ from uuid import UUID
 
 from sqlalchemy import Boolean, DateTime, Enum, Integer, String, func
 from sqlalchemy.dialects.postgresql import UUID as PgUUID
-from sqlalchemy.orm import Mapped, mapped_column, relationship
+from sqlalchemy.orm import Mapped, mapped_column
 from uuid6 import uuid7
 
 from app.common.base import Base
@@ -39,7 +39,7 @@ class User(Base):
 
     email_verified: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
 
-    reset_token: Mapped[str | None] = mapped_column(String(255))
+    reset_token: Mapped[str | None] = mapped_column(String(255), index=True)
 
     reset_token_expiry: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
