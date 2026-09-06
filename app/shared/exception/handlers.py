@@ -1,3 +1,4 @@
+import logging
 from datetime import datetime, timezone
 
 from fastapi import FastAPI, Request, status
@@ -10,6 +11,8 @@ from app.shared.exception.errors import (
     ResourceNotFoundException,
 )
 from app.shared.exception.schemas import ErrorResponse
+
+logger = logging.getLogger(__name__)
 
 
 def _error_body(status_code: int, reason: str, message: str, request: Request) -> dict:
@@ -52,6 +55,22 @@ def register_exception_handlers(app: FastAPI) -> None:
                 status.HTTP_401_UNAUTHORIZED,
                 "Unauthorized",
                 "Authentication is required to access this resource",
+                request,
+            ),
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+    @app.exception_handler(Exception)
+    async def handle_unexpected_exception(request: Request, exc: Exception):
+        # Se registra entero para poder depurarlo, pero al cliente solo le llega
+        # un mensaje generico: nada de tracebacks ni detalles internos.
+        logger.exception("Unhandled exception on %s %s", request.method, request.url.path)
+        return JSONResponse(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            content=_error_body(
+                status.HTTP_500_INTERNAL_SERVER_ERROR,
+                "Internal Server Error",
+                "An unexpected error occurred",
                 request,
             ),
         )
