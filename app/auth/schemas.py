@@ -9,14 +9,16 @@ from app.user.models import Role
 class RegisterRequest(BaseModel):
     model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
 
-    email: EmailStr = Field(..., min_length=8, description="Email is required")
+    # El rol NO se acepta del cliente: siempre se crea como Role.USER.
+    # Promover a ADMIN es una operacion administrativa aparte.
+    email: EmailStr = Field(..., description="Email is required")
     password: str = Field(..., min_length=8, description="Password is required")
-    role: Role = Field(..., description="Role is required")
+
 
 class ForgotPasswordRequest(BaseModel):
     model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
 
-    email: EmailStr = Field(..., min_length=1, description="email is required")
+    email: EmailStr = Field(..., description="email is required")
 
 
 class ResetPasswordRequest(BaseModel):
