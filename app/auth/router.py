@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, Request, Response
+from fastapi import APIRouter, BackgroundTasks, Depends, Request, Response
 from fastapi.security import OAuth2PasswordRequestForm
 
 from app.auth.dependencies import CurrentUser, CurrentUserOptional
@@ -13,6 +13,7 @@ from app.auth.schemas import (
 from app.auth.service import AuthService
 from app.core.database import DBSession
 from app.core.limiter import limiter
+from app.shared.exception.errors import AuthenticationRequiredException
 from app.user.repository import UserRepository
 from app.user.schemas import UserResponse
 
@@ -43,7 +44,7 @@ async def login(
 async def refresh(request: Request, response: Response, db: DBSession):
     token = request.cookies.get("refresh_token")
     if not token:
-        raise HTTPException(status_code=401, detail="No hay sesión activa")
+        raise AuthenticationRequiredException()
     return await auth_service.refresh_session(token, response, db)
 
 
@@ -51,8 +52,7 @@ async def refresh(request: Request, response: Response, db: DBSession):
 async def logout(response: Response, db: DBSession, user: CurrentUserOptional) -> None:
     if user:
         await auth_service.logout(db, user)
-    response.delete_cookie("access_token", path="/")
-    response.delete_cookie("refresh_token", path="/")
+    auth_service.clear_auth_cookies(response)
 
 
 @router.get("/me", response_model=UserResponse, summary="Perfil del usuario autenticado")
@@ -60,16 +60,34 @@ async def get_me(user: CurrentUser):
     return UserResponse.model_validate(user)
 
 
-@router.post("/change-password", status_code=204)
-async def change_password(request: ChangePasswordRequest, db: DBSession, user: CurrentUser):
-    await auth_service.change_password(db, user, request)
+@router.post(
+    "/change-password",
+    response_model=AuthResponse,
+    summary="Cambiar contraseña (cierra las demás sesiones)",
+)
+@limiter.limit("5/minute")
+async def change_password(
+    request: Request,
+    response: Response,
+    body: ChangePasswordRequest,
+    db: DBSession,
+    user: CurrentUser,
+):
+    return await auth_service.change_password(db, user, body, response)
 
 
 @router.post("/forgot-password", status_code=204)
-async def forgot_password(request: ForgotPasswordRequest, db: DBSession):
-    await auth_service.forgot_password(db, request)
+@limiter.limit("3/minute")
+async def forgot_password(
+    request: Request,
+    body: ForgotPasswordRequest,
+    db: DBSession,
+    background_tasks: BackgroundTasks,
+) -> None:
+    await auth_service.forgot_password(db, body, background_tasks)
 
 
 @router.post("/reset-password", status_code=204)
-async def reset_password(request: ResetPasswordRequest, db: DBSession):
-    await auth_service.reset_password(db, request)
+@limiter.limit("5/minute")
+async def reset_password(request: Request, body: ResetPasswordRequest, db: DBSession) -> None:
+    await auth_service.reset_password(db, body)
