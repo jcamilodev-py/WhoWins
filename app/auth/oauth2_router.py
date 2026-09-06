@@ -1,4 +1,7 @@
-from authlib.integrations.starlette_client import OAuth
+import logging
+from urllib.parse import urlencode
+
+from authlib.integrations.starlette_client import OAuth, OAuthError
 from fastapi import APIRouter, Request
 from fastapi.responses import RedirectResponse
 
@@ -7,12 +10,19 @@ from app.user.repository import UserRepository
 from app.core.database import DBSession
 from app.core.settings import settings
 
+logger = logging.getLogger(__name__)
+
 oauth = OAuth()
 oauth.register(name="google", server_metadata_url="https://accounts.google.com/.well-known/openid-configuration", client_id=settings.google_client_id, client_secret=settings.google_client_secret, client_kwargs={"scope": "openid email profile"})
 
 router = APIRouter(tags=["oauth2"])
 
 auth_service = AuthService(UserRepository())
+
+
+def _login_error_redirect(reason: str) -> RedirectResponse:
+    query = urlencode({"error": reason})
+    return RedirectResponse(f"{settings.frontend_url}/login?{query}")
 
 
 @router.get("/oauth2/authorization/google")
@@ -23,13 +33,25 @@ async def google_authorize(request: Request):
 
 @router.get("/login/oauth2/code/google", name="google_callback")
 async def google_callback(request: Request, db: DBSession):
-    token = await oauth.google.authorize_access_token(request)
-    userinfo = token["userinfo"]
+    try:
+        token = await oauth.google.authorize_access_token(request)
+    except OAuthError:
+        logger.warning("Google OAuth callback failed", exc_info=True)
+        return _login_error_redirect("oauth_failed")
 
-    email = userinfo["email"]
-    google_id = userinfo["sub"]
+    userinfo = token.get("userinfo") or {}
 
-    # The session is carried entirely by the httpOnly cookies _issue_tokens sets
+    email = userinfo.get("email")
+    google_id = userinfo.get("sub")
+    if not email or not google_id:
+        return _login_error_redirect("oauth_failed")
+
+    # Sin esta comprobacion, una cuenta de Google con un email sin verificar
+    # podria vincularse a una cuenta local existente y apropiarsela.
+    if not userinfo.get("email_verified"):
+        return _login_error_redirect("email_not_verified")
+
+    # La sesión viaja entera en las cookies httpOnly que pone _issue_tokens
     response = RedirectResponse(f"{settings.frontend_url}/")
     await auth_service.login_with_google(db, email, google_id, response)
 
