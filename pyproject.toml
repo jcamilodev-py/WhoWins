@@ -11,6 +11,7 @@ dependencies = [
     "argon2-cffi>=25.1.0",
     "fastapi>=0.140.7",
     "fastapi-mail>=1.6.5",
+    "itsdangerous>=2.2.0",
     "passlib[argon2]>=1.7.4",
     "pydantic-settings>=2.14.2",
     "pyjwt>=2.13.0",
