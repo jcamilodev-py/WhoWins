@@ -1,0 +1,69 @@
+import uuid
+from httpx import AsyncClient
+import pytest
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.auth.hashing import hash_password
+from app.user.models import AuthProvider, Role, User
+
+
+def _generate_random_email() -> str:
+    return f"admin_test_{uuid.uuid4().hex[:8]}@test.com"
+
+
+async def _create_user_with_role(db: AsyncSession, email: str, role: Role, password: str = "securePassword123") -> User:
+
+    user = User(
+        email=email,
+        password=hash_password(password),
+        role=role,
+        auth_provider=AuthProvider.LOCAL,
+        email_verified=True,
+        active=True,
+    )
+    db.add(user)
+    await db.commit()
+    await db.refresh(user)
+    return user
+
+
+async def test_admin_route_without_token_returns_401(client: AsyncClient):
+
+    fake_id = uuid.uuid4()
+    response = await client.get(f"/api/v1/users/{fake_id}")
+    assert response.status_code == 401
+
+
+async def test_admin_route_with_normal_user_returns_403(client: AsyncClient, db_session: AsyncSession):
+
+    email = _generate_random_email()
+    password = "UserPassword123"
+
+    await _create_user_with_role(db_session, email, Role.USER, password)
+
+    login_res = await client.post("/api/v1/auth/login", data={"username": email, "password": password})
+    token = login_res.json()["accessToken"]
+
+    headers = {"Authorization": f"Bearer {token}"}
+    response = await client.get(f"/api/v1/users/exists/{email}", headers=headers)
+
+    assert response.status_code == 403
+    assert "You do not have permission." in response.json()["detail"]
+
+
+async def test_admin_route_with_admin_user_returns_200(client: AsyncClient, db_session: AsyncSession):
+
+    email = _generate_random_email()
+    password = "AdminPassword123"
+
+    admin_user = await _create_user_with_role(db_session, email, Role.ADMIN, password)
+
+    login_res = await client.post("/api/v1/auth/login", data={"username": email, "password": password})
+    token = login_res.json()["accessToken"]
+    headers = {"Authorization": f"Bearer {token}"}
+    response = await client.get(f"/api/v1/users/{admin_user.id}", headers=headers)
+
+    assert response.status_code == 200
+    user_data = response.json()
+    assert user_data["email"] == email
+    assert user_data["role"] == "ADMIN"
