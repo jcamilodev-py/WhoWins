@@ -55,7 +55,7 @@ async def require_authenticated_user(user: User | None = Depends(get_current_use
 def require_role(*roles: Role):
     async def checker(user: User = Depends(require_authenticated_user)) -> User:
         if user.role not in roles:
-            raise HTTPException(status_code=403, detail="No tienes permisos para esta acción")
+            raise HTTPException(status_code=403, detail="You do not have permission.")
         return user
 
     return checker
