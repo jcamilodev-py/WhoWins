@@ -45,3 +45,18 @@ def test_user_public_from_attributes():
     assert public.id == mock.id
     assert public.email == mock.email
     assert public.role == Role.ADMIN
+
+
+def test_user_update_me_valid_timezone():
+    from app.user.schemas import UserUpdateMe
+
+    schema = UserUpdateMe(timezone="America/Bogota")
+    assert schema.timezone == "America/Bogota"
+
+
+def test_user_update_me_invalid_timezone_raises_error():
+    from app.user.schemas import UserUpdateMe
+
+    with pytest.raises(ValidationError) as exc_info:
+        UserUpdateMe(timezone="Invalid/Zone")
+    assert "Invalid IANA timezone identifier" in str(exc_info.value)
