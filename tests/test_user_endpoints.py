@@ -67,3 +67,74 @@ async def test_admin_route_with_admin_user_returns_200(client: AsyncClient, db_s
     user_data = response.json()
     assert user_data["email"] == email
     assert user_data["role"] == "ADMIN"
+    assert user_data["timezone"] == "UTC"
+
+
+async def test_get_me_unauthenticated_returns_401(client: AsyncClient):
+    response = await client.get("/api/v1/users/me")
+    assert response.status_code == 401
+
+
+async def test_get_me_authenticated_returns_current_user(client: AsyncClient, db_session: AsyncSession):
+    email = _generate_random_email()
+    password = "UserPassword123"
+
+    await _create_user_with_role(db_session, email, Role.USER, password)
+
+    login_res = await client.post("/api/v1/auth/login", data={"username": email, "password": password})
+    token = login_res.json()["accessToken"]
+
+    headers = {"Authorization": f"Bearer {token}"}
+    response = await client.get("/api/v1/users/me", headers=headers)
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["email"] == email
+    assert data["role"] == "USER"
+    assert data["timezone"] == "UTC"
+
+
+async def test_patch_me_updates_timezone(client: AsyncClient, db_session: AsyncSession):
+    email = _generate_random_email()
+    password = "UserPassword123"
+
+    await _create_user_with_role(db_session, email, Role.USER, password)
+
+    login_res = await client.post("/api/v1/auth/login", data={"username": email, "password": password})
+    token = login_res.json()["accessToken"]
+
+    headers = {"Authorization": f"Bearer {token}"}
+    response = await client.patch(
+        "/api/v1/users/me",
+        json={"timezone": "America/Bogota"},
+        headers=headers,
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["timezone"] == "America/Bogota"
+
+    # Verify subsequent GET /me reflects the change
+    get_res = await client.get("/api/v1/users/me", headers=headers)
+    assert get_res.status_code == 200
+    assert get_res.json()["timezone"] == "America/Bogota"
+
+
+async def test_patch_me_invalid_timezone_returns_422(client: AsyncClient, db_session: AsyncSession):
+    email = _generate_random_email()
+    password = "UserPassword123"
+
+    await _create_user_with_role(db_session, email, Role.USER, password)
+
+    login_res = await client.post("/api/v1/auth/login", data={"username": email, "password": password})
+    token = login_res.json()["accessToken"]
+
+    headers = {"Authorization": f"Bearer {token}"}
+    response = await client.patch(
+        "/api/v1/users/me",
+        json={"timezone": "Mars/Olympus_Mons"},
+        headers=headers,
+    )
+
+    assert response.status_code == 422
+
