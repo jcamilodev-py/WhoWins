@@ -37,6 +37,8 @@ class User(Base):
 
     active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
 
+    timezone: Mapped[str] = mapped_column(String(50), nullable=False, default="UTC", server_default="UTC")
+
     email_verified: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
 
     reset_token: Mapped[str | None] = mapped_column(String(255), index=True)
