@@ -1,0 +1,61 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    services:
+      # Integration tests run against a real database (see .agents/rules/testing.md),
+      # so CI needs its own Postgres. Credentials match the defaults in
+      # app/core/settings.py, which is why no DB_* variables are needed below.
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: whowins
+        ports:
+          - 5432:5432
+        # Without this the job can start querying before Postgres accepts
+        # connections, which shows up as random failures.
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    env:
+      JWT_SECRET: ci-only-secret-never-used-outside-this-job
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v10
+        with:
+          enable-cache: true
+
+      - name: Install dependencies
+        run: uv sync
+
+      # Cheap checks first: a syntax or typing error fails in seconds
+      # instead of after the whole suite has run.
+      - name: Lint
+        run: uv run ruff check .
+
+      - name: Check formatting
+        run: uv run ruff format --check .
+
+      - name: Type check
+        run: uv run mypy
+
+      - name: Run migrations
+        run: uv run alembic upgrade head
+
+      - name: Run tests
+        run: uv run pytest
