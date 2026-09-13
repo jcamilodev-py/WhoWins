@@ -1,1 +1,1 @@
-from app.user import models as _user_models
+from app.user import models as _user_models  # noqa: F401
