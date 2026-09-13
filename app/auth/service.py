@@ -1,6 +1,6 @@
 import logging
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from functools import lru_cache
 
 import jwt
@@ -43,8 +43,24 @@ class AuthService:
     def _set_auth_cookies(response: Response, access_token: str, refresh_token: str) -> None:
         secure = not settings.is_dev
 
-        response.set_cookie(key="access_token", value=access_token, max_age=settings.access_token_expire_minutes * 60, httponly=True, secure=secure, samesite="lax", path="/")
-        response.set_cookie(key="refresh_token", value=refresh_token, max_age=settings.refresh_token_expire_days * 86400, httponly=True, secure=secure, samesite="lax", path="/")
+        response.set_cookie(
+            key="access_token",
+            value=access_token,
+            max_age=settings.access_token_expire_minutes * 60,
+            httponly=True,
+            secure=secure,
+            samesite="lax",
+            path="/",
+        )
+        response.set_cookie(
+            key="refresh_token",
+            value=refresh_token,
+            max_age=settings.refresh_token_expire_days * 86400,
+            httponly=True,
+            secure=secure,
+            samesite="lax",
+            path="/",
+        )
 
     @staticmethod
     def clear_auth_cookies(response: Response) -> None:
@@ -64,7 +80,13 @@ class AuthService:
         if await self.repository.exists_by_email(db, request.email):
             raise BusinessException(f"Email already registered: {request.email}")
 
-        user = User(email=request.email, password=hash_password(request.password), role=Role.USER, auth_provider=AuthProvider.LOCAL, email_verified=False)
+        user = User(
+            email=request.email,
+            password=hash_password(request.password),
+            role=Role.USER,
+            auth_provider=AuthProvider.LOCAL,
+            email_verified=False,
+        )
         db.add(user)
         await db.commit()
         await db.refresh(user)
@@ -104,7 +126,13 @@ class AuthService:
                 await db.refresh(existing_user)
                 user = existing_user
             else:
-                new_user = User(email=email, google_id=google_id, role=Role.USER, auth_provider=AuthProvider.GOOGLE, email_verified=True)
+                new_user = User(
+                    email=email,
+                    google_id=google_id,
+                    role=Role.USER,
+                    auth_provider=AuthProvider.GOOGLE,
+                    email_verified=True,
+                )
                 db.add(new_user)
                 await db.commit()
                 await db.refresh(new_user)
@@ -118,8 +146,8 @@ class AuthService:
     async def refresh_session(self, refresh_token: str, response: Response, db: AsyncSession) -> AuthResponse:
         try:
             payload = decode_token(refresh_token)
-        except jwt.PyJWTError:
-            raise AuthenticationRequiredException()
+        except jwt.PyJWTError as err:
+            raise AuthenticationRequiredException() from err
 
         email = payload.get("sub")
         if not email or payload.get("type") != "refresh":
@@ -134,14 +162,16 @@ class AuthService:
 
         return self._issue_tokens(response, user)
 
-    async def forgot_password(self, db: AsyncSession, request: ForgotPasswordRequest, background_tasks: BackgroundTasks) -> None:
+    async def forgot_password(
+        self, db: AsyncSession, request: ForgotPasswordRequest, background_tasks: BackgroundTasks
+    ) -> None:
         user = await self.repository.find_by_email(db, request.email)
         if user is None:
             return
 
         reset_token = str(uuid.uuid4())
         user.reset_token = hash_token(reset_token)
-        user.reset_token_expiry = datetime.now(timezone.utc) + RESET_TOKEN_TTL
+        user.reset_token_expiry = datetime.now(UTC) + RESET_TOKEN_TTL
         db.add(user)
         await db.commit()
 
@@ -161,7 +191,7 @@ class AuthService:
         if user is None:
             raise BusinessException("Invalid or expired reset token")
 
-        if user.reset_token_expiry is None or user.reset_token_expiry < datetime.now(timezone.utc):
+        if user.reset_token_expiry is None or user.reset_token_expiry < datetime.now(UTC):
             raise BusinessException("Reset token has expired")
 
         user.password = hash_password(request.new_password)
@@ -173,7 +203,9 @@ class AuthService:
         db.add(user)
         await db.commit()
 
-    async def change_password(self, db: AsyncSession, user: User, request: ChangePasswordRequest, response: Response) -> AuthResponse:
+    async def change_password(
+        self, db: AsyncSession, user: User, request: ChangePasswordRequest, response: Response
+    ) -> AuthResponse:
         if user.password is None or not verify_password(request.current_password, user.password):
             raise BusinessException("Current password is incorrect")
 
