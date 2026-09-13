@@ -1,0 +1,8 @@
+# Bulk-formatting commits listed here are skipped by `git blame`, so each line
+# stays attributed to the commit that actually changed its logic.
+#
+# GitHub applies this file automatically. To use it locally, run once:
+#   git config blame.ignoreRevsFile .git-blame-ignore-revs
+
+# style: apply ruff format and autofixes
+93514361bea76703382d73ed0e50589a08cdc8b8
