@@ -1,9 +1,9 @@
-from datetime import datetime, timezone
-import pytest
+from datetime import UTC, datetime
+
 import jwt
+import pytest
 
 from app.auth.jwt_handler import create_access_token, create_refresh_token, decode_token
-from app.core.settings import settings
 
 
 def test_create_and_decode_access_token():
@@ -21,7 +21,7 @@ def test_create_and_decode_access_token():
 
     assert "exp" in payload
     exp_timestamp = payload["exp"]
-    current_timestamp = datetime.now(timezone.utc).timestamp()
+    current_timestamp = datetime.now(UTC).timestamp()
     assert exp_timestamp > current_timestamp
 
 

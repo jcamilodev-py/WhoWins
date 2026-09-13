@@ -1,5 +1,5 @@
 import logging
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from fastapi import FastAPI, Request, status
 from fastapi.responses import JSONResponse
@@ -17,7 +17,7 @@ logger = logging.getLogger(__name__)
 
 def _error_body(status_code: int, reason: str, message: str, request: Request) -> dict:
     return ErrorResponse(
-        timestamp=datetime.now(timezone.utc),
+        timestamp=datetime.now(UTC),
         status=status_code,
         error=reason,
         message=message,

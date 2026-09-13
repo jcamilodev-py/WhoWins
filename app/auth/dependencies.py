@@ -22,7 +22,9 @@ def _extract_token(request: Request, token_from_header: str | None) -> str | Non
     return token_from_header
 
 
-async def get_current_user(request: Request, db: DBSession, token_from_header: str | None = Depends(oauth2_scheme)) -> User | None:
+async def get_current_user(
+    request: Request, db: DBSession, token_from_header: str | None = Depends(oauth2_scheme)
+) -> User | None:
     token = _extract_token(request, token_from_header)
     if not token:
         return None

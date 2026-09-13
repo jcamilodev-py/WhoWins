@@ -1,6 +1,6 @@
 import uuid
+
 from httpx import AsyncClient
-import pytest
 
 
 def _generate_random_email() -> str:

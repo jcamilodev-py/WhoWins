@@ -1,8 +1,9 @@
 import uuid
+
 import pytest
 from pydantic import ValidationError
 
-from app.auth.schemas import ChangePasswordRequest, RegisterRequest, UserPublic
+from app.auth.schemas import RegisterRequest, UserPublic
 from app.user.models import Role
 
 

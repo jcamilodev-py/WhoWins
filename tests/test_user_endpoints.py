@@ -1,6 +1,6 @@
 import uuid
+
 from httpx import AsyncClient
-import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.hashing import hash_password
@@ -137,4 +137,3 @@ async def test_patch_me_invalid_timezone_returns_422(client: AsyncClient, db_ses
     )
 
     assert response.status_code == 422
-

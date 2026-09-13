@@ -4,8 +4,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.shared.exception.errors import ResourceNotFoundException
 from app.user.models import User
-from app.user.schemas import UserResponse, UserUpdateMe
 from app.user.repository import UserRepository
+from app.user.schemas import UserResponse, UserUpdateMe
 
 user_repository = UserRepository()
 

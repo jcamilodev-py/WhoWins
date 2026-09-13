@@ -4,8 +4,8 @@ from fastapi import APIRouter
 
 from app.auth.dependencies import CurrentUser, RequireRoleAdmin
 from app.core.database import DBSession
-from app.user.schemas import UserResponse, UserUpdateMe
 from app.user import service as user_service
+from app.user.schemas import UserResponse, UserUpdateMe
 
 router = APIRouter(prefix="/api/v1/users", tags=["users"])
 

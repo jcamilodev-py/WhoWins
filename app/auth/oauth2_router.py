@@ -6,14 +6,20 @@ from fastapi import APIRouter, Request
 from fastapi.responses import RedirectResponse
 
 from app.auth.service import AuthService
-from app.user.repository import UserRepository
 from app.core.database import DBSession
 from app.core.settings import settings
+from app.user.repository import UserRepository
 
 logger = logging.getLogger(__name__)
 
 oauth = OAuth()
-oauth.register(name="google", server_metadata_url="https://accounts.google.com/.well-known/openid-configuration", client_id=settings.google_client_id, client_secret=settings.google_client_secret, client_kwargs={"scope": "openid email profile"})
+oauth.register(
+    name="google",
+    server_metadata_url="https://accounts.google.com/.well-known/openid-configuration",
+    client_id=settings.google_client_id,
+    client_secret=settings.google_client_secret,
+    client_kwargs={"scope": "openid email profile"},
+)
 
 router = APIRouter(tags=["oauth2"])
 
