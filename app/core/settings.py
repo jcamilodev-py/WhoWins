@@ -8,20 +8,24 @@ class Settings(BaseSettings):
 
     env: str = "dev"
 
-    db_host: str
-    db_port: int
-    db_name: str
-    db_user: str
-    db_password: str
+    db_host: str = "localhost"
+    db_port: int = 5432
+    db_name: str = "whowins"
+    db_user: str = "postgres"
+    db_password: str = "postgres"
 
-    google_client_id: str
-    google_client_secret: str
+    google_client_id: str = ""
+    google_client_secret: str = ""
 
-    mail_username: str
-    mail_password: str
+    # Feeds MAIL_FROM, which validates as a real address: empty values and
+    # reserved TLDs like .local both fail at import time.
+    mail_username: str = "noreply@example.com"
+    mail_password: str = ""
 
     frontend_url: str = "http://localhost:5173"
 
+    # Deliberately has no default: a shipped fallback would let a deployment
+    # sign tokens with a publicly known secret.
     jwt_secret: str
     access_token_expire_minutes: int = 15
     refresh_token_expire_days: int = 7
