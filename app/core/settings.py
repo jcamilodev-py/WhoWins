@@ -43,10 +43,7 @@ class Settings(BaseSettings):
 
     @property
     def database_url(self) -> str:
-        return (
-            f"postgresql+asyncpg://{self.db_user}:{self.db_password}"
-            f"@{self.db_host}:{self.db_port}/{self.db_name}"
-        )
+        return f"postgresql+asyncpg://{self.db_user}:{self.db_password}@{self.db_host}:{self.db_port}/{self.db_name}"
 
     @property
     def is_dev(self) -> bool:
@@ -61,4 +58,6 @@ class Settings(BaseSettings):
         return self.session_secret or self.jwt_secret
 
 
-settings = Settings()
+# Required fields are loaded from the environment at runtime (pydantic-settings),
+# but mypy's synthesized __init__ still treats them as required call args.
+settings = Settings()  # type: ignore[call-arg]

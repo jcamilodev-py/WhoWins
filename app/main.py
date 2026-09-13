@@ -4,18 +4,18 @@ from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 from starlette.middleware.sessions import SessionMiddleware
 
+from app.auth.oauth2_router import router as oauth2_router
+from app.auth.router import router as auth_router
 from app.core.limiter import limiter
 from app.core.settings import settings
 from app.shared.exception.handlers import register_exception_handlers
 from app.user.router import router as user_router
-from app.auth.oauth2_router import router as oauth2_router
-from app.auth.router import router as auth_router
-
 
 app = FastAPI(title="whowins", version="1.0", description="whowins")
 
 app.state.limiter = limiter
-app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+# slowapi's handler predates Starlette's typed exception-handler signature.
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)  # type: ignore[arg-type]
 
 
 # authlib guarda el "state" del flujo OAuth en request.session, asi que este

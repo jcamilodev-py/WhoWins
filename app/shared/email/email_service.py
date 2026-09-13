@@ -4,7 +4,7 @@ from app.core.settings import settings
 
 _conf = ConnectionConfig(
     MAIL_USERNAME=settings.mail_username,
-    MAIL_PASSWORD=settings.mail_password,
+    MAIL_PASSWORD=settings.mail_password,  # type: ignore[arg-type]  # pydantic coerces str -> SecretStr
     MAIL_FROM=settings.mail_username,
     MAIL_PORT=587,
     MAIL_SERVER="smtp.gmail.com",
@@ -25,7 +25,7 @@ async def send_password_reset_email(to_email: str, reset_token: str) -> None:
     )
     message = MessageSchema(
         subject="Password Reset Request - whowins",
-        recipients=[to_email],
+        recipients=[to_email],  # type: ignore[list-item]  # pydantic coerces str -> NameEmail
         body=body,
         subtype=MessageType.plain,
     )
