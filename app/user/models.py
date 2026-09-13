@@ -10,12 +10,12 @@ from uuid6 import uuid7
 from app.common.base import Base
 
 
-class Role(str, enum.Enum):
+class Role(enum.StrEnum):
     ADMIN = "ADMIN"
     USER = "USER"
 
 
-class AuthProvider(str, enum.Enum):
+class AuthProvider(enum.StrEnum):
     LOCAL = "LOCAL"
     GOOGLE = "GOOGLE"
 
@@ -49,4 +49,6 @@ class User(Base):
 
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 
-    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False
+    )
