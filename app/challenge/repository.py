@@ -19,6 +19,20 @@ class ChallengeRepository(BaseRepository[Challenge]):
         result = await db.execute(select(Challenge).where(Challenge.invite_code == invite_code))
         return result.scalar_one_or_none()
 
+    async def find_preview_by_invite_code(
+        self, db: AsyncSession, invite_code: str
+    ) -> Row[tuple[Challenge, int, str | None]] | None:
+        """The challenge with its member count and its creator's display name."""
+        member_count = (
+            select(func.count(ChallengeMember.id)).where(ChallengeMember.challenge_id == Challenge.id).scalar_subquery()
+        )
+        result = await db.execute(
+            select(Challenge, member_count, User.display_name)
+            .join(User, User.id == Challenge.created_by)
+            .where(Challenge.invite_code == invite_code)
+        )
+        return result.one_or_none()
+
     async def exists_by_invite_code(self, db: AsyncSession, invite_code: str) -> bool:
         result = await db.execute(select(exists().where(Challenge.invite_code == invite_code)))
         return bool(result.scalar())
