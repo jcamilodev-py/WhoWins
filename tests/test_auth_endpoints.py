@@ -7,23 +7,71 @@ def _generate_random_email() -> str:
     return f"user_{uuid.uuid4().hex[:8]}@test.com"
 
 
+def _register_payload(email: str, password: str = "securepassword123", display_name: str = "Test User") -> dict:
+    return {"email": email, "password": password, "displayName": display_name}
+
+
 async def test_register_user_success(client: AsyncClient):
     email = _generate_random_email()
-    payload = {"email": email, "password": "securepassword123"}
 
-    response = await client.post("/api/v1/auth/register", json=payload)
+    response = await client.post("/api/v1/auth/register", json=_register_payload(email, display_name="Valentina"))
 
     assert response.status_code == 201
     data = response.json()
     assert data["email"] == email
+    assert data["displayName"] == "Valentina"
     assert data["role"] == "USER"
     assert "password" not in data
 
 
-async def test_register_duplicate_email_returns_bad_request(client: AsyncClient):
+async def test_register_trims_display_name(client: AsyncClient):
+    response = await client.post(
+        "/api/v1/auth/register", json=_register_payload(_generate_random_email(), display_name="  Valentina  ")
+    )
 
-    email = _generate_random_email()
-    payload = {"email": email, "password": "securepassword123"}
+    assert response.status_code == 201
+    assert response.json()["displayName"] == "Valentina"
+
+
+async def test_register_without_display_name_returns_422(client: AsyncClient):
+    payload = {"email": _generate_random_email(), "password": "securepassword123"}
+
+    response = await client.post("/api/v1/auth/register", json=payload)
+
+    assert response.status_code == 422
+    assert ["body", "displayName"] in [error["loc"] for error in response.json()["detail"]]
+
+
+async def test_register_with_blank_display_name_returns_422(client: AsyncClient):
+    response = await client.post(
+        "/api/v1/auth/register", json=_register_payload(_generate_random_email(), display_name="   ")
+    )
+
+    assert response.status_code == 422
+
+
+async def test_register_with_display_name_over_40_characters_returns_422(client: AsyncClient):
+    response = await client.post(
+        "/api/v1/auth/register", json=_register_payload(_generate_random_email(), display_name="x" * 41)
+    )
+
+    assert response.status_code == 422
+
+
+async def test_register_allows_duplicate_display_names(client: AsyncClient):
+    first = await client.post(
+        "/api/v1/auth/register", json=_register_payload(_generate_random_email(), display_name="Juan")
+    )
+    second = await client.post(
+        "/api/v1/auth/register", json=_register_payload(_generate_random_email(), display_name="Juan")
+    )
+
+    assert first.status_code == 201
+    assert second.status_code == 201
+
+
+async def test_register_duplicate_email_returns_bad_request(client: AsyncClient):
+    payload = _register_payload(_generate_random_email())
 
     res1 = await client.post("/api/v1/auth/register", json=payload)
     assert res1.status_code == 201
@@ -39,7 +87,7 @@ async def test_login_success(client: AsyncClient):
     email = _generate_random_email()
     password = "MyStrongPassword_99"
 
-    await client.post("/api/v1/auth/register", json={"email": email, "password": password})
+    await client.post("/api/v1/auth/register", json=_register_payload(email, password, display_name="Andrés"))
 
     login_payload = {"username": email, "password": password}
     response = await client.post("/api/v1/auth/login", data=login_payload)
@@ -50,6 +98,7 @@ async def test_login_success(client: AsyncClient):
     assert "accessToken" in data
     assert data["tokenType"] == "bearer"
     assert data["user"]["email"] == email
+    assert data["user"]["displayName"] == "Andrés"
     assert "access_token" in response.cookies
     assert "refresh_token" in response.cookies
 
@@ -58,7 +107,10 @@ async def test_login_with_wrong_password_fails(client: AsyncClient):
     email = _generate_random_email()
     real_password = "realPassword"
 
-    await client.post("/api/v1/auth/register", json={"email": email, "password": real_password})
+    register_response = await client.post("/api/v1/auth/register", json=_register_payload(email, real_password))
+    # Guards the premise: without an existing account the 401 below would prove nothing.
+    assert register_response.status_code == 201
+
     wrong_payload = {"username": email, "password": "wrongPassword123"}
     response = await client.post("/api/v1/auth/login", data=wrong_payload)
 
@@ -74,7 +126,7 @@ async def test_get_me_authorized_with_token(client: AsyncClient):
     email = _generate_random_email()
     password = "SuperSecretPassword123"
 
-    await client.post("/api/v1/auth/register", json={"email": email, "password": password})
+    await client.post("/api/v1/auth/register", json=_register_payload(email, password, display_name="Sofía"))
     login_res = await client.post("/api/v1/auth/login", data={"username": email, "password": password})
     token = login_res.json()["accessToken"]
 
@@ -84,4 +136,5 @@ async def test_get_me_authorized_with_token(client: AsyncClient):
     assert me_res.status_code == 200
     profile = me_res.json()
     assert profile["email"] == email
+    assert profile["displayName"] == "Sofía"
     assert profile["active"] is True
