@@ -2,6 +2,7 @@ import secrets
 from datetime import date, datetime, timedelta
 from zoneinfo import ZoneInfo
 
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.challenge.models import (
@@ -113,15 +114,28 @@ class ChallengeService:
                 # Today is excluded: the new member can still check in before midnight.
                 missed_days = _count_active_days(challenge.start_date, today, challenge.active_days)
 
+        # Plain values: rollback() below expires every ORM object in the session,
+        # and touching an expired attribute in async code raises MissingGreenlet.
+        challenge_id, user_id = challenge.id, user.id
+
         db.add(
             ChallengeMember(
-                challenge_id=challenge.id,
-                user_id=user.id,
+                challenge_id=challenge_id,
+                user_id=user_id,
                 role=MemberRole.MEMBER,
                 missed_days_count=missed_days,
             )
         )
-        await db.commit()
+        try:
+            await db.commit()
+        except IntegrityError:
+            # Two concurrent joins (a double tap) can both pass the membership check
+            # above; the unique constraint rejects the second one.
+            await db.rollback()
+            if await self.member_repository.exists_by_challenge_and_user(db, challenge_id, user_id):
+                raise DuplicateResourceException("Challenge member", "user id", user_id) from None
+            raise
+
         await db.refresh(challenge)
 
         return ChallengeResponse.model_validate(challenge)
