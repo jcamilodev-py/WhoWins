@@ -20,7 +20,7 @@ from app.auth.schemas import (
 from app.core.settings import settings
 from app.shared.email.email_service import send_password_reset_email
 from app.shared.exception.errors import AuthenticationRequiredException, BusinessException
-from app.user.models import AuthProvider, Role, User
+from app.user.models import DISPLAY_NAME_MAX_LENGTH, AuthProvider, Role, User
 from app.user.repository import UserRepository
 
 logger = logging.getLogger(__name__)
@@ -33,6 +33,12 @@ def _dummy_password_hash() -> str:
     """Hash contra el que se verifica cuando el usuario no existe, para que el
     coste en tiempo de /login sea el mismo exista o no la cuenta."""
     return hash_password("dummy-password-for-constant-time-comparison")
+
+
+def _display_name_from_google(google_name: str | None) -> str | None:
+    if google_name is None:
+        return None
+    return google_name.strip()[:DISPLAY_NAME_MAX_LENGTH].strip() or None
 
 
 class AuthService:
@@ -82,6 +88,7 @@ class AuthService:
 
         user = User(
             email=request.email,
+            display_name=request.display_name,
             password=hash_password(request.password),
             role=Role.USER,
             auth_provider=AuthProvider.LOCAL,
@@ -113,7 +120,9 @@ class AuthService:
         user = await self.authenticate_user(db, email, password)
         return self._issue_tokens(response, user)
 
-    async def login_with_google(self, db: AsyncSession, email: str, google_id: str, response: Response) -> AuthResponse:
+    async def login_with_google(
+        self, db: AsyncSession, email: str, google_id: str, google_name: str | None, response: Response
+    ) -> AuthResponse:
         user = await self.repository.find_by_google_id(db, google_id)
 
         if user is None:
@@ -121,22 +130,23 @@ class AuthService:
             if existing_user is not None:
                 existing_user.google_id = google_id
                 existing_user.email_verified = True
-                db.add(existing_user)
-                await db.commit()
-                await db.refresh(existing_user)
                 user = existing_user
             else:
-                new_user = User(
+                user = User(
                     email=email,
                     google_id=google_id,
                     role=Role.USER,
                     auth_provider=AuthProvider.GOOGLE,
                     email_verified=True,
                 )
-                db.add(new_user)
-                await db.commit()
-                await db.refresh(new_user)
-                user = new_user
+
+        # Google's name only fills a missing one: a name the user already chose wins.
+        if user.display_name is None:
+            user.display_name = _display_name_from_google(google_name)
+
+        db.add(user)
+        await db.commit()
+        await db.refresh(user)
 
         if not user.active:
             raise BusinessException("User account is disabled")
