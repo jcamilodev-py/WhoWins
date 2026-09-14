@@ -9,6 +9,8 @@ from uuid6 import uuid7
 
 from app.common.base import Base
 
+DISPLAY_NAME_MAX_LENGTH = 40
+
 
 class Role(enum.StrEnum):
     ADMIN = "ADMIN"
@@ -26,6 +28,11 @@ class User(Base):
     id: Mapped[UUID] = mapped_column(PgUUID(as_uuid=True), primary_key=True, default=uuid7)
 
     email: Mapped[str] = mapped_column(String(150), unique=True, nullable=False, index=True)
+
+    # Required at registration but nullable here: accounts created before the field
+    # existed, and Google accounts whose profile has no name, set it later.
+    # Deliberately not unique: it is a name shown to friends, not a handle.
+    display_name: Mapped[str | None] = mapped_column(String(DISPLAY_NAME_MAX_LENGTH))
 
     password: Mapped[str | None] = mapped_column("password_hash", String(255))
 
