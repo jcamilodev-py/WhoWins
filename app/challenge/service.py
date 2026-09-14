@@ -1,5 +1,6 @@
 import secrets
 from datetime import date, datetime, timedelta
+from uuid import UUID
 from zoneinfo import ZoneInfo
 
 from sqlalchemy.exc import IntegrityError
@@ -14,7 +15,15 @@ from app.challenge.models import (
     MemberRole,
 )
 from app.challenge.repository import ChallengeMemberRepository, ChallengeRepository
-from app.challenge.schemas import ChallengeCreate, ChallengeResponse, JoinChallengeRequest
+from app.challenge.schemas import (
+    ChallengeCreate,
+    ChallengeDetailResponse,
+    ChallengeMemberResponse,
+    ChallengeResponse,
+    JoinChallengeRequest,
+    LeaderboardEntryResponse,
+    MyChallengeResponse,
+)
 from app.shared.exception.errors import BusinessException, DuplicateResourceException, ResourceNotFoundException
 from app.user.models import User
 
@@ -139,3 +148,42 @@ class ChallengeService:
         await db.refresh(challenge)
 
         return ChallengeResponse.model_validate(challenge)
+
+    async def list_for_user(self, db: AsyncSession, user: User) -> list[MyChallengeResponse]:
+        rows = await self.challenge_repository.find_all_for_user(db, user.id)
+        return [
+            MyChallengeResponse(
+                challenge=ChallengeResponse.model_validate(challenge),
+                my_membership=ChallengeMemberResponse.model_validate(membership),
+                member_count=member_count,
+            )
+            for challenge, membership, member_count in rows
+        ]
+
+    async def get_detail(self, db: AsyncSession, user: User, challenge_id: UUID) -> ChallengeDetailResponse:
+        challenge = await self.challenge_repository.find_by_id(db, challenge_id)
+        members = await self.member_repository.find_leaderboard(db, challenge_id) if challenge else []
+
+        # 404 rather than 403 for non-members, so a private challenge's existence
+        # is not confirmed to someone who merely has its id.
+        if challenge is None or all(member.user_id != user.id for member in members):
+            raise ResourceNotFoundException("Challenge", "id", challenge_id)
+
+        leaderboard: list[LeaderboardEntryResponse] = []
+        rank = 0
+        for position, member in enumerate(members, start=1):
+            if position == 1 or member.missed_days_count != members[position - 2].missed_days_count:
+                rank = position
+            leaderboard.append(
+                LeaderboardEntryResponse(
+                    rank=rank,
+                    user_id=member.user_id,
+                    role=member.role,
+                    current_individual_streak=member.current_individual_streak,
+                    best_individual_streak=member.best_individual_streak,
+                    missed_days_count=member.missed_days_count,
+                    joined_at=member.joined_at,
+                )
+            )
+
+        return ChallengeDetailResponse(challenge=ChallengeResponse.model_validate(challenge), leaderboard=leaderboard)
