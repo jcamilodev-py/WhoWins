@@ -417,6 +417,159 @@ async def test_join_ended_challenge_returns_400(client: AsyncClient, db_session:
     assert response.status_code == 400
 
 
+# --- preview ---
+
+
+async def test_preview_challenge_without_token_returns_401(client: AsyncClient):
+    response = await client.post("/api/v1/challenges/preview", json={"inviteCode": "WINS-AAAA"})
+    assert response.status_code == 401
+
+
+async def test_preview_challenge_with_unknown_code_returns_404(client: AsyncClient, db_session: AsyncSession):
+    user = await _create_user(db_session)
+
+    response = await client.post(
+        "/api/v1/challenges/preview", json={"inviteCode": "WINS-NONE"}, headers=await _login(client, user)
+    )
+
+    assert response.status_code == 404
+
+
+async def test_preview_open_challenge_shows_details_without_joining(client: AsyncClient, db_session: AsyncSession):
+    creator = await _create_user(db_session, display_name="Valentina")
+    challenge = await _insert_challenge(
+        db_session, creator, title="Read 30 minutes", start_date=_utc_today() + timedelta(days=2)
+    )
+    db_session.add(ChallengeMember(challenge_id=challenge.id, user_id=creator.id, role=MemberRole.CREATOR))
+    await db_session.commit()
+    visitor = await _create_user(db_session)
+    challenge_id, visitor_id = challenge.id, visitor.id
+
+    response = await client.post(
+        "/api/v1/challenges/preview",
+        json={"inviteCode": f" {challenge.invite_code.lower()} "},
+        headers=await _login(client, visitor),
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["id"] == str(challenge_id)
+    assert data["title"] == "Read 30 minutes"
+    assert data["memberCount"] == 1
+    assert data["creatorDisplayName"] == "Valentina"
+    assert data["joinStatus"] == "OPEN"
+    assert data["missedDaysOnJoin"] == 0
+    assert await _find_member(db_session, challenge_id, visitor_id) is None
+
+
+async def test_preview_inherit_missed_challenge_predicts_what_join_assigns(
+    client: AsyncClient, db_session: AsyncSession
+):
+    creator = await _create_user(db_session)
+    challenge = await _insert_challenge(
+        db_session,
+        creator,
+        start_date=_utc_today() - timedelta(days=7),
+        active_days=[0, 1, 2, 3, 4],
+        late_join_policy=LateJoinPolicy.INHERIT_MISSED,
+        status=ChallengeStatus.ACTIVE,
+    )
+    visitor = await _create_user(db_session)
+    headers = await _login(client, visitor)
+    body = {"inviteCode": challenge.invite_code}
+
+    preview = await client.post("/api/v1/challenges/preview", json=body, headers=headers)
+    await client.post("/api/v1/challenges/join", json=body, headers=headers)
+
+    member = await _find_member(db_session, challenge.id, visitor.id)
+    assert member is not None
+    assert preview.json()["missedDaysOnJoin"] == 5
+    assert member.missed_days_count == 5
+
+
+async def test_preview_challenge_as_member_returns_already_member(client: AsyncClient, db_session: AsyncSession):
+    creator = await _create_user(db_session)
+    # Finished on purpose: membership is reported first, so a member is sent to the challenge.
+    challenge = await _insert_challenge(db_session, creator, status=ChallengeStatus.COMPLETED)
+    db_session.add(ChallengeMember(challenge_id=challenge.id, user_id=creator.id, role=MemberRole.CREATOR))
+    await db_session.commit()
+
+    response = await client.post(
+        "/api/v1/challenges/preview", json={"inviteCode": challenge.invite_code}, headers=await _login(client, creator)
+    )
+
+    assert response.json()["joinStatus"] == "ALREADY_MEMBER"
+    assert response.json()["missedDaysOnJoin"] is None
+
+
+async def test_preview_started_closed_challenge_returns_closed(client: AsyncClient, db_session: AsyncSession):
+    creator = await _create_user(db_session)
+    challenge = await _insert_challenge(
+        db_session,
+        creator,
+        start_date=_utc_today() - timedelta(days=3),
+        late_join_policy=LateJoinPolicy.CLOSED,
+        status=ChallengeStatus.ACTIVE,
+    )
+    visitor = await _create_user(db_session)
+
+    response = await client.post(
+        "/api/v1/challenges/preview", json={"inviteCode": challenge.invite_code}, headers=await _login(client, visitor)
+    )
+
+    assert response.json()["joinStatus"] == "CLOSED"
+    assert response.json()["missedDaysOnJoin"] is None
+
+
+@pytest.mark.parametrize(
+    "overrides",
+    [
+        pytest.param({"status": ChallengeStatus.CANCELLED}, id="cancelled"),
+        pytest.param(
+            {
+                "duration_type": DurationType.DAYS_10,
+                "total_days": 10,
+                "start_date": _utc_today() - timedelta(days=15),
+                "end_date": _utc_today() - timedelta(days=6),
+                "status": ChallengeStatus.ACTIVE,
+            },
+            id="past-end-date",
+        ),
+    ],
+)
+async def test_preview_finished_challenge_returns_finished(
+    client: AsyncClient, db_session: AsyncSession, overrides: dict
+):
+    creator = await _create_user(db_session)
+    challenge = await _insert_challenge(db_session, creator, **overrides)
+    visitor = await _create_user(db_session)
+
+    response = await client.post(
+        "/api/v1/challenges/preview", json={"inviteCode": challenge.invite_code}, headers=await _login(client, visitor)
+    )
+
+    assert response.json()["joinStatus"] == "FINISHED"
+
+
+async def test_preview_challenge_does_not_expose_members_or_emails(client: AsyncClient, db_session: AsyncSession):
+    creator = await _create_user(db_session)
+    member = await _create_user(db_session, display_name="Hidden Member")
+    challenge = await _insert_challenge(db_session, creator)
+    db_session.add(ChallengeMember(challenge_id=challenge.id, user_id=creator.id, role=MemberRole.CREATOR))
+    db_session.add(ChallengeMember(challenge_id=challenge.id, user_id=member.id))
+    await db_session.commit()
+    visitor = await _create_user(db_session)
+
+    response = await client.post(
+        "/api/v1/challenges/preview", json={"inviteCode": challenge.invite_code}, headers=await _login(client, visitor)
+    )
+
+    assert "leaderboard" not in response.json()
+    assert "Hidden Member" not in response.text
+    assert creator.email not in response.text
+    assert member.email not in response.text
+
+
 # --- list ---
 
 
