@@ -3,6 +3,7 @@ import uuid
 from datetime import UTC, date, datetime, timedelta
 from zoneinfo import ZoneInfo
 
+import pytest
 from httpx import AsyncClient
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -16,6 +17,7 @@ from app.challenge.models import (
     LateJoinPolicy,
     MemberRole,
 )
+from app.challenge.router import challenge_service
 from app.challenge.service import INVITE_CODE_ALPHABET
 from app.user.models import AuthProvider, Role, User
 
@@ -238,6 +240,34 @@ async def test_join_challenge_twice_returns_409(client: AsyncClient, db_session:
 
     assert first.status_code == 200
     assert second.status_code == 409
+
+
+async def test_concurrent_join_hitting_unique_constraint_returns_409(
+    client: AsyncClient, db_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+):
+    creator = await _create_user(db_session)
+    challenge = await _insert_challenge(db_session, creator)
+    joiner = await _create_user(db_session)
+    headers = await _login(client, joiner)
+    invite_code = challenge.invite_code
+    db_session.add(ChallengeMember(challenge_id=challenge.id, user_id=joiner.id))
+    await db_session.commit()
+
+    # Reproduces a double tap deterministically: the first membership check reads
+    # before the other request's row is visible, so the insert hits the constraint.
+    real_check = challenge_service.member_repository.exists_by_challenge_and_user
+    calls = 0
+
+    async def stale_then_real_check(*args, **kwargs):
+        nonlocal calls
+        calls += 1
+        return False if calls == 1 else await real_check(*args, **kwargs)
+
+    monkeypatch.setattr(challenge_service.member_repository, "exists_by_challenge_and_user", stale_then_real_check)
+
+    response = await client.post("/api/v1/challenges/join", json={"inviteCode": invite_code}, headers=headers)
+
+    assert response.status_code == 409
 
 
 async def test_creator_joining_own_challenge_returns_409(client: AsyncClient, db_session: AsyncSession):
