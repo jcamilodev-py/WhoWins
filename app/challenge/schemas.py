@@ -95,6 +95,8 @@ class LeaderboardEntryResponse(BaseModel):
     # No email on purpose: anyone holding the invite code can see this list.
     rank: int
     user_id: UUID
+    # Null for accounts that have not set a name yet; clients show a fallback.
+    display_name: str | None
     role: MemberRole
     current_individual_streak: int
     best_individual_streak: int
