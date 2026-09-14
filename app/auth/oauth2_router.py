@@ -59,6 +59,6 @@ async def google_callback(request: Request, db: DBSession):
 
     # La sesión viaja entera en las cookies httpOnly que pone _issue_tokens
     response = RedirectResponse(f"{settings.frontend_url}/")
-    await auth_service.login_with_google(db, email, google_id, response)
+    await auth_service.login_with_google(db, email, google_id, userinfo.get("name"), response)
 
     return response
