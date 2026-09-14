@@ -52,6 +52,10 @@ async def _create_user(db: AsyncSession, timezone: str = "UTC") -> User:
 
 async def _login(client: AsyncClient, user: User) -> dict[str, str]:
     response = await client.post("/api/v1/auth/login", data={"username": user.email, "password": PASSWORD})
+    # Login also sets an access_token cookie, and the auth dependency reads the cookie
+    # before the Authorization header. Left in the client's jar, the most recent login
+    # would silently authenticate every request that follows, whatever header it sends.
+    client.cookies.clear()
     return {"Authorization": f"Bearer {response.json()['accessToken']}"}
 
 
@@ -410,3 +414,110 @@ async def test_join_ended_challenge_returns_400(client: AsyncClient, db_session:
     )
 
     assert response.status_code == 400
+
+
+# --- list ---
+
+
+async def test_list_challenges_without_token_returns_401(client: AsyncClient):
+    response = await client.get("/api/v1/challenges")
+    assert response.status_code == 401
+
+
+async def test_list_challenges_for_user_without_any_returns_empty_list(client: AsyncClient, db_session: AsyncSession):
+    user = await _create_user(db_session)
+
+    response = await client.get("/api/v1/challenges", headers=await _login(client, user))
+
+    assert response.status_code == 200
+    assert response.json() == []
+
+
+async def test_list_challenges_returns_only_own_with_role_and_member_count(
+    client: AsyncClient, db_session: AsyncSession
+):
+    alice = await _create_user(db_session)
+    bob = await _create_user(db_session)
+    alice_headers = await _login(client, alice)
+    bob_headers = await _login(client, bob)
+
+    alice_challenge = await client.post(
+        "/api/v1/challenges", json=_create_payload(title="Alice's"), headers=alice_headers
+    )
+    await client.post("/api/v1/challenges", json=_create_payload(title="Bob's"), headers=bob_headers)
+    await client.post(
+        "/api/v1/challenges/join", json={"inviteCode": alice_challenge.json()["inviteCode"]}, headers=bob_headers
+    )
+
+    alice_list = (await client.get("/api/v1/challenges", headers=alice_headers)).json()
+    bob_list = (await client.get("/api/v1/challenges", headers=bob_headers)).json()
+
+    assert [item["challenge"]["title"] for item in alice_list] == ["Alice's"]
+    assert alice_list[0]["myMembership"]["role"] == "CREATOR"
+    assert alice_list[0]["memberCount"] == 2
+
+    bob_roles = {item["challenge"]["title"]: item["myMembership"]["role"] for item in bob_list}
+    assert bob_roles == {"Alice's": "MEMBER", "Bob's": "CREATOR"}
+
+
+# --- detail ---
+
+
+async def test_get_challenge_without_token_returns_401(client: AsyncClient):
+    response = await client.get(f"/api/v1/challenges/{uuid.uuid4()}")
+    assert response.status_code == 401
+
+
+async def test_get_unknown_challenge_returns_404(client: AsyncClient, db_session: AsyncSession):
+    user = await _create_user(db_session)
+
+    response = await client.get(f"/api/v1/challenges/{uuid.uuid4()}", headers=await _login(client, user))
+
+    assert response.status_code == 404
+
+
+async def test_get_challenge_as_non_member_returns_404(client: AsyncClient, db_session: AsyncSession):
+    creator = await _create_user(db_session)
+    challenge = await _insert_challenge(db_session, creator)
+    db_session.add(ChallengeMember(challenge_id=challenge.id, user_id=creator.id, role=MemberRole.CREATOR))
+    await db_session.commit()
+    outsider = await _create_user(db_session)
+
+    response = await client.get(f"/api/v1/challenges/{challenge.id}", headers=await _login(client, outsider))
+
+    assert response.status_code == 404
+
+
+async def test_get_challenge_leaderboard_ranks_fewest_missed_days_first_with_shared_ties(
+    client: AsyncClient, db_session: AsyncSession
+):
+    users = [await _create_user(db_session) for _ in range(4)]
+    challenge = await _insert_challenge(db_session, users[0])
+    missed_by_user = {users[0].id: 3, users[1].id: 0, users[2].id: 3, users[3].id: 1}
+    for user_id, missed in missed_by_user.items():
+        db_session.add(ChallengeMember(challenge_id=challenge.id, user_id=user_id, missed_days_count=missed))
+    await db_session.commit()
+
+    response = await client.get(f"/api/v1/challenges/{challenge.id}", headers=await _login(client, users[0]))
+
+    assert response.status_code == 200
+    leaderboard = response.json()["leaderboard"]
+    assert [entry["missedDaysCount"] for entry in leaderboard] == [0, 1, 3, 3]
+    assert [entry["rank"] for entry in leaderboard] == [1, 2, 3, 3]
+    assert leaderboard[0]["userId"] == str(users[1].id)
+    assert leaderboard[1]["userId"] == str(users[3].id)
+
+
+async def test_get_challenge_does_not_expose_member_emails(client: AsyncClient, db_session: AsyncSession):
+    creator = await _create_user(db_session)
+    member = await _create_user(db_session)
+    challenge = await _insert_challenge(db_session, creator)
+    db_session.add(ChallengeMember(challenge_id=challenge.id, user_id=creator.id, role=MemberRole.CREATOR))
+    db_session.add(ChallengeMember(challenge_id=challenge.id, user_id=member.id))
+    await db_session.commit()
+
+    response = await client.get(f"/api/v1/challenges/{challenge.id}", headers=await _login(client, creator))
+
+    assert response.status_code == 200
+    assert creator.email not in response.text
+    assert member.email not in response.text
