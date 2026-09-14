@@ -15,6 +15,8 @@ def _to_response(user: User) -> UserResponse:
 
 
 async def update_me(db: AsyncSession, user: User, data: UserUpdateMe) -> UserResponse:
+    if data.display_name is not None:
+        user.display_name = data.display_name
     if data.timezone is not None:
         user.timezone = data.timezone
     db.add(user)
