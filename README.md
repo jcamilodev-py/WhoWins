@@ -84,6 +84,7 @@ erDiagram
     User {
         uuid id PK "UUIDv7"
         string email UK
+        string display_name "1-40 chars, not unique"
         string password_hash
         string role "ADMIN | USER"
         string auth_provider "LOCAL | GOOGLE"
