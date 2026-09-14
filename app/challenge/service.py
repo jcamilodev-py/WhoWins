@@ -19,8 +19,10 @@ from app.challenge.schemas import (
     ChallengeCreate,
     ChallengeDetailResponse,
     ChallengeMemberResponse,
+    ChallengePreviewResponse,
     ChallengeResponse,
     JoinChallengeRequest,
+    JoinStatus,
     LeaderboardEntryResponse,
     MyChallengeResponse,
 )
@@ -48,6 +50,26 @@ def _local_today(user: User) -> date:
 def _count_active_days(start: date, end_exclusive: date, active_days: list[int]) -> int:
     elapsed = (end_exclusive - start).days
     return sum(1 for offset in range(elapsed) if (start + timedelta(days=offset)).weekday() in active_days)
+
+
+def _join_status(challenge: Challenge, today: date) -> JoinStatus:
+    """Whether a non-member can join today. Shared by join and preview so they never disagree."""
+    if challenge.status in (ChallengeStatus.COMPLETED, ChallengeStatus.CANCELLED):
+        return JoinStatus.FINISHED
+    # Compared against dates, not the stored status: nothing flips PENDING to
+    # ACTIVE yet, so status alone would report a started challenge as pending.
+    if challenge.end_date is not None and today > challenge.end_date:
+        return JoinStatus.FINISHED
+    if today >= challenge.start_date and challenge.late_join_policy == LateJoinPolicy.CLOSED:
+        return JoinStatus.CLOSED
+    return JoinStatus.OPEN
+
+
+def _missed_days_on_join(challenge: Challenge, today: date) -> int:
+    if today < challenge.start_date or challenge.late_join_policy != LateJoinPolicy.INHERIT_MISSED:
+        return 0
+    # Today is excluded: the new member can still check in before midnight.
+    return _count_active_days(challenge.start_date, today, challenge.active_days)
 
 
 class ChallengeService:
@@ -106,22 +128,13 @@ class ChallengeService:
         if await self.member_repository.exists_by_challenge_and_user(db, challenge.id, user.id):
             raise DuplicateResourceException("Challenge member", "user id", user.id)
 
-        if challenge.status in (ChallengeStatus.COMPLETED, ChallengeStatus.CANCELLED):
-            raise BusinessException("This challenge is no longer accepting members.")
-
-        # Compared against dates, not the stored status: nothing flips PENDING to
-        # ACTIVE yet, so status alone would report a started challenge as pending.
         today = _local_today(user)
-        if challenge.end_date is not None and today > challenge.end_date:
-            raise BusinessException("This challenge has already ended.")
-
-        missed_days = 0
-        if today >= challenge.start_date:
-            if challenge.late_join_policy == LateJoinPolicy.CLOSED:
-                raise BusinessException("This challenge has already started and is closed to new members.")
-            if challenge.late_join_policy == LateJoinPolicy.INHERIT_MISSED:
-                # Today is excluded: the new member can still check in before midnight.
-                missed_days = _count_active_days(challenge.start_date, today, challenge.active_days)
+        join_status = _join_status(challenge, today)
+        if join_status == JoinStatus.FINISHED:
+            raise BusinessException("This challenge has already finished.")
+        if join_status == JoinStatus.CLOSED:
+            raise BusinessException("This challenge has already started and is closed to new members.")
+        missed_days = _missed_days_on_join(challenge, today)
 
         # Plain values: rollback() below expires every ORM object in the session,
         # and touching an expired attribute in async code raises MissingGreenlet.
@@ -148,6 +161,37 @@ class ChallengeService:
         await db.refresh(challenge)
 
         return ChallengeResponse.model_validate(challenge)
+
+    async def preview(self, db: AsyncSession, user: User, data: JoinChallengeRequest) -> ChallengePreviewResponse:
+        row = await self.challenge_repository.find_preview_by_invite_code(db, data.invite_code)
+        if row is None:
+            raise ResourceNotFoundException("Challenge", "invite code", data.invite_code)
+        challenge, member_count, creator_display_name = row
+
+        # Checked first, like join: a member opening their own invite link should
+        # be sent to the challenge, even if it has finished.
+        today = _local_today(user)
+        if await self.member_repository.exists_by_challenge_and_user(db, challenge.id, user.id):
+            join_status = JoinStatus.ALREADY_MEMBER
+        else:
+            join_status = _join_status(challenge, today)
+
+        return ChallengePreviewResponse(
+            id=challenge.id,
+            title=challenge.title,
+            description=challenge.description,
+            duration_type=challenge.duration_type,
+            total_days=challenge.total_days,
+            start_date=challenge.start_date,
+            end_date=challenge.end_date,
+            active_days=challenge.active_days,
+            requires_approval=challenge.requires_approval,
+            late_join_policy=challenge.late_join_policy,
+            member_count=member_count,
+            creator_display_name=creator_display_name,
+            join_status=join_status,
+            missed_days_on_join=_missed_days_on_join(challenge, today) if join_status == JoinStatus.OPEN else None,
+        )
 
     async def list_for_user(self, db: AsyncSession, user: User) -> list[MyChallengeResponse]:
         rows = await self.challenge_repository.find_all_for_user(db, user.id)
