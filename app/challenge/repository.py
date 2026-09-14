@@ -7,6 +7,7 @@ from sqlalchemy.orm import aliased
 
 from app.challenge.models import Challenge, ChallengeMember
 from app.common.repositories import BaseRepository
+from app.user.models import User
 
 
 class ChallengeRepository(BaseRepository[Challenge]):
@@ -47,13 +48,17 @@ class ChallengeMemberRepository(BaseRepository[ChallengeMember]):
         )
         return bool(result.scalar())
 
-    async def find_leaderboard(self, db: AsyncSession, challenge_id: UUID) -> Sequence[ChallengeMember]:
-        # Fewest missed days wins. Ties stay in join order until a tie-breaker is defined.
+    async def find_leaderboard(
+        self, db: AsyncSession, challenge_id: UUID
+    ) -> Sequence[Row[tuple[ChallengeMember, str | None]]]:
+        """Each member with their display name, fewest missed days first."""
+        # Ties stay in join order until a tie-breaker is defined.
         result = await db.execute(
-            select(ChallengeMember)
+            select(ChallengeMember, User.display_name)
+            .join(User, User.id == ChallengeMember.user_id)
             .where(ChallengeMember.challenge_id == challenge_id)
             .order_by(
                 ChallengeMember.missed_days_count.asc(), ChallengeMember.joined_at.asc(), ChallengeMember.id.asc()
             )
         )
-        return result.scalars().all()
+        return result.all()
