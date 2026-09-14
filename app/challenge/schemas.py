@@ -78,3 +78,32 @@ class ChallengeMemberResponse(BaseModel):
     best_individual_streak: int
     missed_days_count: int
     joined_at: datetime
+
+
+class MyChallengeResponse(BaseModel):
+    model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
+
+    challenge: ChallengeResponse
+    my_membership: ChallengeMemberResponse
+    member_count: int
+
+
+class LeaderboardEntryResponse(BaseModel):
+    model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
+
+    # Members with equal missed days share a rank (1, 1, 3) until a tie-breaker exists.
+    # No email on purpose: anyone holding the invite code can see this list.
+    rank: int
+    user_id: UUID
+    role: MemberRole
+    current_individual_streak: int
+    best_individual_streak: int
+    missed_days_count: int
+    joined_at: datetime
+
+
+class ChallengeDetailResponse(BaseModel):
+    model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
+
+    challenge: ChallengeResponse
+    leaderboard: list[LeaderboardEntryResponse]
