@@ -104,8 +104,10 @@ erDiagram
         date start_date
         date end_date "calculated or null"
         int_array active_days "[0,1,2,3,4] (Mon-Fri)"
+        string visibility "PUBLIC | PRIVATE"
         boolean requires_approval
-        string status "ACTIVE | COMPLETED | CANCELLED"
+        string late_join_policy "CLEAN | INHERIT_MISSED | CLOSED"
+        string status "PENDING | ACTIVE | COMPLETED | CANCELLED"
         int current_group_streak
         int best_group_streak
         uuid created_by FK
