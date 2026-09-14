@@ -4,6 +4,7 @@ from pydantic import BaseModel, ConfigDict, EmailStr, Field
 from pydantic.alias_generators import to_camel
 
 from app.user.models import Role
+from app.user.schemas import DisplayName
 
 
 class RegisterRequest(BaseModel):
@@ -13,6 +14,7 @@ class RegisterRequest(BaseModel):
     # Promover a ADMIN es una operacion administrativa aparte.
     email: EmailStr = Field(..., description="Email is required")
     password: str = Field(..., min_length=8, description="Password is required")
+    display_name: DisplayName = Field(..., description="Display name is required")
 
 
 class ForgotPasswordRequest(BaseModel):
@@ -40,6 +42,7 @@ class UserPublic(BaseModel):
 
     id: uuid.UUID
     email: EmailStr
+    display_name: str | None
     role: Role
 
 
