@@ -1,11 +1,15 @@
 from datetime import datetime
+from typing import Annotated
 from uuid import UUID
 from zoneinfo import available_timezones
 
-from pydantic import BaseModel, ConfigDict, EmailStr, field_validator
+from pydantic import BaseModel, ConfigDict, EmailStr, StringConstraints, field_validator
 from pydantic.alias_generators import to_camel
 
-from app.user.models import AuthProvider, Role
+from app.user.models import DISPLAY_NAME_MAX_LENGTH, AuthProvider, Role
+
+# Stripping runs before the length check, so a name of only spaces is rejected.
+DisplayName = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=DISPLAY_NAME_MAX_LENGTH)]
 
 
 class UserResponse(BaseModel):
@@ -13,6 +17,7 @@ class UserResponse(BaseModel):
 
     id: UUID
     email: EmailStr
+    display_name: str | None
     role: Role
     auth_provider: AuthProvider
     timezone: str
@@ -25,6 +30,7 @@ class UserResponse(BaseModel):
 class UserUpdateMe(BaseModel):
     model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
 
+    display_name: DisplayName | None = None
     timezone: str | None = None
 
     @field_validator("timezone")
