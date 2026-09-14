@@ -1,7 +1,8 @@
 from datetime import date, datetime
+from typing import Annotated
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, StringConstraints, field_validator
 from pydantic.alias_generators import to_camel
 
 from app.challenge.models import ChallengeStatus, DurationType, LateJoinPolicy, MemberRole, Visibility
@@ -36,7 +37,11 @@ class ChallengeCreate(BaseModel):
 class JoinChallengeRequest(BaseModel):
     model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
 
-    invite_code: str = Field(..., min_length=1, max_length=20, description="Invite code is required")
+    # Codes are typed by hand on phones, so casing and stray spaces must not
+    # turn a correct code into "not found". Stripping runs before the length check.
+    invite_code: Annotated[
+        str, StringConstraints(strip_whitespace=True, to_upper=True, min_length=1, max_length=20)
+    ] = Field(..., description="Invite code is required")
 
 
 class ChallengeResponse(BaseModel):
