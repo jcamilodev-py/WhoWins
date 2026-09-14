@@ -1,4 +1,5 @@
 from datetime import date, datetime
+from enum import StrEnum
 from typing import Annotated
 from uuid import UUID
 
@@ -109,3 +110,35 @@ class ChallengeDetailResponse(BaseModel):
 
     challenge: ChallengeResponse
     leaderboard: list[LeaderboardEntryResponse]
+
+
+class JoinStatus(StrEnum):
+    OPEN = "OPEN"
+    ALREADY_MEMBER = "ALREADY_MEMBER"
+    # Started, and the late-join policy is CLOSED.
+    CLOSED = "CLOSED"
+    # Completed, cancelled, or past its end date.
+    FINISHED = "FINISHED"
+
+
+class ChallengePreviewResponse(BaseModel):
+    model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
+
+    # Only what someone needs to decide whether to join. The leaderboard and the
+    # other members' names stay members-only; the stored status is left out because
+    # it can be stale, and join_status already answers the question it would.
+    id: UUID
+    title: str
+    description: str | None
+    duration_type: DurationType
+    total_days: int | None
+    start_date: date
+    end_date: date | None
+    active_days: list[int]
+    requires_approval: bool
+    late_join_policy: LateJoinPolicy
+    member_count: int
+    creator_display_name: str | None
+    join_status: JoinStatus
+    # Null unless join_status is OPEN.
+    missed_days_on_join: int | None
