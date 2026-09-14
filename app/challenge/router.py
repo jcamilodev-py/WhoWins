@@ -7,6 +7,7 @@ from app.challenge.repository import ChallengeMemberRepository, ChallengeReposit
 from app.challenge.schemas import (
     ChallengeCreate,
     ChallengeDetailResponse,
+    ChallengePreviewResponse,
     ChallengeResponse,
     JoinChallengeRequest,
     MyChallengeResponse,
@@ -33,6 +34,15 @@ async def get_challenge(challenge_id: UUID, db: DBSession, current_user: Current
 @router.post("", response_model=ChallengeResponse, status_code=status.HTTP_201_CREATED)
 async def create_challenge(body: ChallengeCreate, db: DBSession, current_user: CurrentUser):
     return await challenge_service.create(db, current_user, body)
+
+
+@router.post("/preview", response_model=ChallengePreviewResponse)
+# POST rather than GET with a query string: URLs end up in access logs and browser
+# history, and the invite code is the only thing guarding a private challenge.
+# Rate-limited like join, since it would otherwise be a faster way to guess codes.
+@limiter.limit("10/minute")
+async def preview_challenge(request: Request, body: JoinChallengeRequest, db: DBSession, current_user: CurrentUser):
+    return await challenge_service.preview(db, current_user, body)
 
 
 @router.post("/join", response_model=ChallengeResponse)
