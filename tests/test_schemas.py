@@ -9,15 +9,16 @@ from app.user.models import Role
 
 def test_register_request_valid_data():
 
-    data = {"email": "user@example.com", "password": "password123"}
+    data = {"email": "user@example.com", "password": "password123", "display_name": "  Valentina "}
     request = RegisterRequest(**data)
 
     assert request.email == "user@example.com"
     assert request.password == "password123"
+    assert request.display_name == "Valentina"
 
 
 def test_register_request_invalid_email_raises_validation_error():
-    invalid_data = {"email": "invalid-email", "password": "password123"}
+    invalid_data = {"email": "invalid-email", "password": "password123", "display_name": "Valentina"}
 
     with pytest.raises(ValidationError) as exc_info:
         RegisterRequest(**invalid_data)
@@ -26,7 +27,7 @@ def test_register_request_invalid_email_raises_validation_error():
 
 def test_register_request_short_password_raises_validation_error():
 
-    short_pwd_data = {"email": "test@example.com", "password": "123"}
+    short_pwd_data = {"email": "test@example.com", "password": "123", "display_name": "Valentina"}
 
     with pytest.raises(ValidationError) as exc_info:
         RegisterRequest(**short_pwd_data)
@@ -38,6 +39,7 @@ def test_user_public_from_attributes():
     class MockUser:
         id = uuid.uuid4()
         email = "admin@example.com"
+        display_name = "Admin"
         role = Role.ADMIN
 
     mock = MockUser()
@@ -45,6 +47,7 @@ def test_user_public_from_attributes():
 
     assert public.id == mock.id
     assert public.email == mock.email
+    assert public.display_name == "Admin"
     assert public.role == Role.ADMIN
 
 
