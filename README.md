@@ -168,6 +168,7 @@ erDiagram
 | Method | Endpoint | Description |
 |---|---|---|
 | `POST` | `/api/v1/challenges` | Create a new challenge (generates invite code) |
+| `POST` | `/api/v1/challenges/preview` | Preview a challenge by invite code before joining (join status, inherited missed days) |
 | `POST` | `/api/v1/challenges/join` | Join a challenge via invite code |
 | `GET` | `/api/v1/challenges` | List active challenges for current user |
 | `GET` | `/api/v1/challenges/{id}` | Challenge dashboard, streaks & leaderboard |
