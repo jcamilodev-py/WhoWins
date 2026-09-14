@@ -162,22 +162,25 @@ class ChallengeService:
 
     async def get_detail(self, db: AsyncSession, user: User, challenge_id: UUID) -> ChallengeDetailResponse:
         challenge = await self.challenge_repository.find_by_id(db, challenge_id)
-        members = await self.member_repository.find_leaderboard(db, challenge_id) if challenge else []
+        rows = await self.member_repository.find_leaderboard(db, challenge_id) if challenge else []
 
         # 404 rather than 403 for non-members, so a private challenge's existence
         # is not confirmed to someone who merely has its id.
-        if challenge is None or all(member.user_id != user.id for member in members):
+        if challenge is None or all(member.user_id != user.id for member, _ in rows):
             raise ResourceNotFoundException("Challenge", "id", challenge_id)
 
         leaderboard: list[LeaderboardEntryResponse] = []
         rank = 0
-        for position, member in enumerate(members, start=1):
-            if position == 1 or member.missed_days_count != members[position - 2].missed_days_count:
+        previous_missed: int | None = None
+        for position, (member, display_name) in enumerate(rows, start=1):
+            if member.missed_days_count != previous_missed:
                 rank = position
+                previous_missed = member.missed_days_count
             leaderboard.append(
                 LeaderboardEntryResponse(
                     rank=rank,
                     user_id=member.user_id,
+                    display_name=display_name,
                     role=member.role,
                     current_individual_streak=member.current_individual_streak,
                     best_individual_streak=member.best_individual_streak,
