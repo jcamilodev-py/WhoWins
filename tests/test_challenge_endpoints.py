@@ -34,9 +34,10 @@ def _utc_today() -> date:
     return datetime.now(UTC).date()
 
 
-async def _create_user(db: AsyncSession, timezone: str = "UTC") -> User:
+async def _create_user(db: AsyncSession, timezone: str = "UTC", display_name: str | None = "Test User") -> User:
     user = User(
         email=f"challenge_test_{uuid.uuid4().hex[:8]}@test.com",
+        display_name=display_name,
         password=hash_password(PASSWORD),
         role=Role.USER,
         auth_provider=AuthProvider.LOCAL,
@@ -506,6 +507,21 @@ async def test_get_challenge_leaderboard_ranks_fewest_missed_days_first_with_sha
     assert [entry["rank"] for entry in leaderboard] == [1, 2, 3, 3]
     assert leaderboard[0]["userId"] == str(users[1].id)
     assert leaderboard[1]["userId"] == str(users[3].id)
+
+
+async def test_get_challenge_leaderboard_shows_each_member_display_name(client: AsyncClient, db_session: AsyncSession):
+    creator = await _create_user(db_session, display_name="Valentina")
+    unnamed = await _create_user(db_session, display_name=None)
+    challenge = await _insert_challenge(db_session, creator)
+    db_session.add(ChallengeMember(challenge_id=challenge.id, user_id=creator.id, role=MemberRole.CREATOR))
+    db_session.add(ChallengeMember(challenge_id=challenge.id, user_id=unnamed.id, missed_days_count=1))
+    await db_session.commit()
+    creator_id, unnamed_id = str(creator.id), str(unnamed.id)
+
+    response = await client.get(f"/api/v1/challenges/{challenge.id}", headers=await _login(client, creator))
+
+    names = {entry["userId"]: entry["displayName"] for entry in response.json()["leaderboard"]}
+    assert names == {creator_id: "Valentina", unnamed_id: None}
 
 
 async def test_get_challenge_does_not_expose_member_emails(client: AsyncClient, db_session: AsyncSession):
