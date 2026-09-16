@@ -1,0 +1,50 @@
+# Local object storage for development. MinIO speaks the S3 API, so the same
+# code runs against S3, R2 or Supabase Storage in production by changing env vars.
+#
+#   docker compose up -d      start MinIO and create the bucket
+#   docker compose down       stop it (uploaded files survive in the volume)
+#   docker compose down -v    stop it and delete every uploaded file
+#
+# Postgres is intentionally absent: this project uses a locally installed one.
+services:
+  minio:
+    # MinIO images live on quay.io; the Docker Hub repository is gone.
+    image: quay.io/minio/minio:RELEASE.2025-09-07T16-13-09Z
+    container_name: whowins-minio
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${STORAGE_ACCESS_KEY:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${STORAGE_SECRET_KEY:-minioadmin}
+    ports:
+      # 9000 is the S3 API the backend and the browser talk to; 9001 is the admin console.
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - minio-data:/data
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # Runs once, creates the bucket if it is missing, then exits. Without it the
+  # first upload would fail against an empty MinIO.
+  minio-init:
+    image: quay.io/minio/mc:RELEASE.2025-08-13T08-35-41Z
+    container_name: whowins-minio-init
+    depends_on:
+      minio:
+        condition: service_healthy
+    environment:
+      STORAGE_ACCESS_KEY: ${STORAGE_ACCESS_KEY:-minioadmin}
+      STORAGE_SECRET_KEY: ${STORAGE_SECRET_KEY:-minioadmin}
+      STORAGE_BUCKET: ${STORAGE_BUCKET:-whowins}
+    entrypoint: >
+      /bin/sh -c "
+      mc alias set local http://minio:9000 $$STORAGE_ACCESS_KEY $$STORAGE_SECRET_KEY &&
+      mc mb --ignore-existing local/$$STORAGE_BUCKET &&
+      echo 'Bucket ready: '$$STORAGE_BUCKET
+      "
+
+volumes:
+  minio-data:
