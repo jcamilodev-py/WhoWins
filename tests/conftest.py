@@ -1,4 +1,6 @@
-from collections.abc import AsyncGenerator
+import socket
+from collections.abc import AsyncGenerator, Generator
+from urllib.parse import urlparse
 
 import pytest
 from httpx import ASGITransport, AsyncClient
@@ -6,7 +8,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import engine, get_db
 from app.core.limiter import limiter
+from app.core.settings import settings
 from app.main import app
+from app.shared.storage.object_storage import ObjectStorage, object_storage
 
 
 @pytest.fixture(autouse=True)
@@ -42,3 +46,27 @@ async def client(db_session: AsyncSession) -> AsyncGenerator[AsyncClient]:
             yield ac
     finally:
         del app.dependency_overrides[get_db]
+
+
+@pytest.fixture(scope="session")
+def storage() -> ObjectStorage:
+    """The real object storage, or a skip when it is not running.
+
+    A plain socket probe, not an S3 call: botocore spends ~14 seconds retrying an
+    endpoint that is not listening, which would slow the whole suite down.
+    """
+    endpoint = urlparse(settings.storage_signing_endpoint)
+    with socket.socket() as probe:
+        probe.settimeout(0.5)
+        if probe.connect_ex((endpoint.hostname or "localhost", endpoint.port or 9000)) != 0:
+            pytest.skip(f"Object storage is not listening on {settings.storage_signing_endpoint}")
+    return object_storage
+
+
+@pytest.fixture
+def uploaded_keys(storage: ObjectStorage) -> Generator[list[str]]:
+    """Keys to remove afterwards: the database rolls back after each test, storage does not."""
+    keys: list[str] = []
+    yield keys
+    for key in keys:
+        storage._client.delete_object(Bucket=storage.bucket, Key=key)

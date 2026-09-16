@@ -1,8 +1,6 @@
-import socket
 from urllib.parse import parse_qs, urlparse
 
 import httpx
-import pytest
 
 from app.core.settings import settings
 from app.shared.storage.object_storage import ObjectStorage, object_storage
@@ -57,23 +55,6 @@ def test_download_url_uses_its_own_expiry():
 
 
 # --- round trip against a real MinIO (skipped when it is not running) ---
-
-
-@pytest.fixture(scope="session")
-def storage() -> ObjectStorage:
-    """Skips instead of failing, so the suite still runs without docker compose up.
-
-    A plain socket probe, not an S3 call: botocore spends ~14 seconds retrying an
-    endpoint that is not listening, which would slow the whole suite down.
-    """
-    endpoint = urlparse(settings.storage_signing_endpoint)
-    with socket.socket() as probe:
-        probe.settimeout(0.5)
-        if probe.connect_ex((endpoint.hostname or "localhost", endpoint.port or 9000)) != 0:
-            pytest.skip(
-                f"Object storage is not listening on {settings.storage_signing_endpoint} (docker compose up -d)"
-            )
-    return object_storage
 
 
 async def test_uploaded_object_can_be_inspected_and_deleted(storage: ObjectStorage):
