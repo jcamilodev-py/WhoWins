@@ -10,6 +10,7 @@ from uuid6 import uuid7
 from app.common.base import Base
 
 DISPLAY_NAME_MAX_LENGTH = 40
+AVATAR_KEY_MAX_LENGTH = 255
 
 
 class Role(enum.StrEnum):
@@ -33,6 +34,10 @@ class User(Base):
     # existed, and Google accounts whose profile has no name, set it later.
     # Deliberately not unique: it is a name shown to friends, not a handle.
     display_name: Mapped[str | None] = mapped_column(String(DISPLAY_NAME_MAX_LENGTH))
+
+    # The object storage key, not a URL: the storage host, the bucket and the
+    # signature all change over time, the key does not.
+    avatar_key: Mapped[str | None] = mapped_column(String(AVATAR_KEY_MAX_LENGTH))
 
     password: Mapped[str | None] = mapped_column("password_hash", String(255))
 
