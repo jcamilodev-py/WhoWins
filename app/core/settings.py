@@ -30,16 +30,16 @@ class Settings(BaseSettings):
     access_token_expire_minutes: int = 15
     refresh_token_expire_days: int = 7
 
-    # Firma la cookie de sesión que authlib usa para el "state" de OAuth.
-    # Si no se define cae en jwt_secret para que la app arranque igualmente.
+    # Signs the session cookie authlib uses for the OAuth "state". Falls back
+    # to jwt_secret when unset, so the app still starts.
     session_secret: str | None = None
-    # Vida de esa cookie: solo tiene que sobrevivir al handshake con Google.
+    # That cookie only has to outlive the handshake with Google.
     session_max_age_seconds: int = 600
 
     cors_allowed_origins: str = "http://localhost:5173"
 
-    # "memory://" solo es correcto con un unico worker. En produccion usar
-    # p.ej. "redis://localhost:6379" para que el limite sea global.
+    # "memory://" is only correct with a single worker. In production use
+    # e.g. "redis://localhost:6379" so the limit is shared across workers.
     rate_limit_storage_uri: str = "memory://"
 
     # Object storage (MinIO in development, S3/R2/Supabase in production).

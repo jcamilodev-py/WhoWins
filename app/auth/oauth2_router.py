@@ -57,7 +57,7 @@ async def google_callback(request: Request, db: DBSession):
     if not userinfo.get("email_verified"):
         return _login_error_redirect("email_not_verified")
 
-    # La sesión viaja entera en las cookies httpOnly que pone _issue_tokens
+    # The whole session travels in the httpOnly cookies _issue_tokens sets
     response = RedirectResponse(f"{settings.frontend_url}/")
     await auth_service.login_with_google(db, email, google_id, userinfo.get("name"), response)
 

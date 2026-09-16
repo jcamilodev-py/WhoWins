@@ -28,7 +28,7 @@ async def register(request: Request, body: RegisterRequest, db: DBSession):
     return await auth_service.register(db, body)
 
 
-@router.post("/login", response_model=AuthResponse, summary="Iniciar sesión")
+@router.post("/login", response_model=AuthResponse, summary="Log in")
 @limiter.limit("5/minute")
 async def login(
     request: Request,
@@ -39,7 +39,7 @@ async def login(
     return await auth_service.login(db, form_data.username, form_data.password, response)
 
 
-@router.post("/refresh", response_model=AuthResponse, summary="Renovar sesión")
+@router.post("/refresh", response_model=AuthResponse, summary="Refresh the session")
 @limiter.limit("10/minute")
 async def refresh(request: Request, response: Response, db: DBSession):
     token = request.cookies.get("refresh_token")
@@ -48,7 +48,7 @@ async def refresh(request: Request, response: Response, db: DBSession):
     return await auth_service.refresh_session(token, response, db)
 
 
-@router.post("/logout", status_code=204, summary="Cerrar sesión")
+@router.post("/logout", status_code=204, summary="Log out")
 async def logout(response: Response, db: DBSession, user: CurrentUserOptional) -> None:
     if user:
         await auth_service.logout(db, user)
@@ -63,7 +63,7 @@ async def get_me(user: CurrentUser):
 @router.post(
     "/change-password",
     response_model=AuthResponse,
-    summary="Cambiar contraseña (cierra las demás sesiones)",
+    summary="Change password (ends other sessions)",
 )
 @limiter.limit("5/minute")
 async def change_password(
