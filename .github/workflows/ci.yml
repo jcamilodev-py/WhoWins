@@ -59,5 +59,14 @@ jobs:
       - name: Run migrations
         run: uv run alembic upgrade head
 
+      # MinIO cannot be a `services:` container: those cannot override the image
+      # command, and MinIO needs `server /data`. Compose starts the same setup
+      # developers run locally, so the storage tests run here instead of skipping.
+      - name: Start object storage
+        run: docker compose up -d --wait minio
+
+      - name: Create the bucket
+        run: docker compose up minio-init
+
       - name: Run tests
         run: uv run pytest
