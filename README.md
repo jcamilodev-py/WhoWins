@@ -85,6 +85,7 @@ erDiagram
         uuid id PK "UUIDv7"
         string email UK
         string display_name "1-40 chars, not unique"
+        string avatar_key "object storage key, nullable"
         string password_hash
         string role "ADMIN | USER"
         string auth_provider "LOCAL | GOOGLE"
@@ -163,6 +164,9 @@ erDiagram
 | `GET` | `/api/v1/auth/google/callback`| Handle Google OAuth2 callback |
 | `GET` | `/api/v1/users/me` | Fetch authenticated user profile & timezone |
 | `PATCH` | `/api/v1/users/me` | Update user settings (timezone, display name) |
+| `POST` | `/api/v1/users/me/avatar/upload-url` | Presigned PUT URL for the profile photo (browser uploads directly) |
+| `PUT` | `/api/v1/users/me/avatar` | Confirm the uploaded photo (verifies size and type) |
+| `DELETE` | `/api/v1/users/me/avatar` | Remove the profile photo |
 
 ### Challenges & Groups
 | Method | Endpoint | Description |
