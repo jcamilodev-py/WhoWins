@@ -55,7 +55,7 @@ async def logout(response: Response, db: DBSession, user: CurrentUserOptional) -
     auth_service.clear_auth_cookies(response)
 
 
-@router.get("/me", response_model=UserResponse, summary="Perfil del usuario autenticado")
+@router.get("/me", response_model=UserResponse, summary="Authenticated user profile")
 async def get_me(user: CurrentUser):
     return UserResponse.model_validate(user)
 
