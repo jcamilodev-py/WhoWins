@@ -22,6 +22,7 @@ from app.shared.exception.errors import BusinessException, ResourceNotFoundExcep
 from app.shared.storage.images import image_extension, normalize_image_content_type, verify_uploaded_image
 from app.shared.storage.object_storage import object_storage
 from app.shared.timezones import local_today, start_of_day
+from app.streaks.service import streak_service
 from app.user.models import User
 
 # A proof stops counting only when the group rejects it; while it waits, the
@@ -121,6 +122,10 @@ class CheckInService:
         db.add(check_in)
         await db.commit()
         await db.refresh(check_in)
+
+        # The proof just changed what the streaks say; the leaderboard should not
+        # have to wait for someone to open the challenge to find out.
+        await streak_service.recalculate(db, challenge)
 
         return self._to_response(check_in)
 
