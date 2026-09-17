@@ -649,7 +649,17 @@ async def test_get_challenge_leaderboard_ranks_fewest_missed_days_first_with_sha
     challenge = await _insert_challenge(db_session, users[0])
     missed_by_user = {users[0].id: 3, users[1].id: 0, users[2].id: 3, users[3].id: 1}
     for user_id, missed in missed_by_user.items():
-        db_session.add(ChallengeMember(challenge_id=challenge.id, user_id=user_id, missed_days_count=missed))
+        # Set as inherited days, not as a raw total: reading the challenge
+        # recomputes missed_days_count from the check-ins, so a total invented
+        # here would simply be corrected away.
+        db_session.add(
+            ChallengeMember(
+                challenge_id=challenge.id,
+                user_id=user_id,
+                missed_days_count=missed,
+                inherited_missed_days=missed,
+            )
+        )
     await db_session.commit()
 
     response = await client.get(f"/api/v1/challenges/{challenge.id}", headers=await _login(client, users[0]))
