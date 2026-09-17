@@ -182,9 +182,9 @@ erDiagram
 ### Check-ins & Media
 | Method | Endpoint | Description |
 |---|---|---|
-| `POST` | `/api/v1/challenges/{id}/checkin/upload-url` | Generate presigned PUT URL for direct S3/MinIO upload |
-| `POST` | `/api/v1/challenges/{id}/checkin/confirm` | Confirm upload, log check-in & update streaks |
-| `GET` | `/api/v1/challenges/{id}/checkin/today` | Status of today's submissions for all group members |
+| `POST` | `/api/v1/challenges/{id}/checkins/upload-url` | Presigned PUT URL for the daily proof (direct upload) |
+| `POST` | `/api/v1/challenges/{id}/checkins/confirm` | Confirm the upload and record the check-in |
+| `GET` | `/api/v1/challenges/{id}/checkins/today` | Today's status for every member, each on their own calendar day |
 | `POST` | `/api/v1/checkins/{checkin_id}/review` | Peer review photo (approve/reject) |
 | `GET` | `/api/v1/challenges/{id}/collage` | Download photo collage upon challenge completion |
 
