@@ -7,6 +7,7 @@ from starlette.middleware.sessions import SessionMiddleware
 from app.auth.oauth2_router import router as oauth2_router
 from app.auth.router import router as auth_router
 from app.challenge.router import router as challenge_router
+from app.checkin.router import router as check_in_router
 from app.core.limiter import limiter
 from app.core.settings import settings
 from app.shared.exception.handlers import register_exception_handlers
@@ -43,3 +44,4 @@ app.include_router(user_router)
 app.include_router(oauth2_router)
 app.include_router(auth_router)
 app.include_router(challenge_router)
+app.include_router(check_in_router)
