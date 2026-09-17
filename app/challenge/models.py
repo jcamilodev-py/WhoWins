@@ -119,6 +119,13 @@ class ChallengeMember(Base):
     current_individual_streak: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     best_individual_streak: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
 
+    # The whole score, recomputed from the check-ins: inherited days plus every
+    # active day this member let pass without an accepted proof.
     missed_days_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+
+    # What INHERIT_MISSED charged at join time. Kept apart from the total because
+    # it is a decision taken once, not something the check-ins can re-derive
+    # later if the challenge's policy is ever edited.
+    inherited_missed_days: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
 
     joined_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
