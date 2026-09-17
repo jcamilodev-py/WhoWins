@@ -27,6 +27,7 @@ from app.challenge.schemas import (
     MyChallengeResponse,
 )
 from app.shared.exception.errors import BusinessException, DuplicateResourceException, ResourceNotFoundException
+from app.streaks.service import streak_service
 from app.user.models import User
 
 # No 0/O or 1/I/L: codes get read aloud and typed by hand.
@@ -146,6 +147,7 @@ class ChallengeService:
                 user_id=user_id,
                 role=MemberRole.MEMBER,
                 missed_days_count=missed_days,
+                inherited_missed_days=missed_days,
             )
         )
         try:
@@ -212,6 +214,11 @@ class ChallengeService:
         # is not confirmed to someone who merely has its id.
         if challenge is None or all(member.user_id != user.id for member, _ in rows):
             raise ResourceNotFoundException("Challenge", "id", challenge_id)
+
+        # Deduced on read: nothing schedules this, so the only moment the scores
+        # can be trusted is the moment someone asks for them.
+        await streak_service.recalculate(db, challenge)
+        rows = await self.member_repository.find_leaderboard(db, challenge_id)
 
         leaderboard: list[LeaderboardEntryResponse] = []
         rank = 0
