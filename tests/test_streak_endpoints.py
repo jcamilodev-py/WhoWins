@@ -263,3 +263,59 @@ async def test_each_member_is_charged_on_their_own_calendar(
     # Nobody uploaded anything: the eastern member already lost that day, while
     # the western one still has until their own midnight.
     assert scores == {"East": 1, "West": 0}
+
+
+async def test_reading_a_challenge_that_started_flips_it_to_active(
+    client: AsyncClient, db_session: AsyncSession, storage: ObjectStorage
+):
+    member = await _create_user(db_session)
+    # Arranged as PENDING although its start date has already arrived: this is
+    # what every challenge created before today looks like, since nothing moved
+    # the status over time.
+    challenge = await _create_challenge(
+        db_session, member, start_date=_utc_today(), status=ChallengeStatus.PENDING, joined_days_ago=1
+    )
+
+    response = await client.get(f"/api/v1/challenges/{challenge.id}", headers=await _login(client, member))
+
+    assert response.json()["challenge"]["status"] == "ACTIVE"
+    await db_session.refresh(challenge)
+    assert challenge.status == ChallengeStatus.ACTIVE
+
+
+async def test_reading_a_challenge_whose_last_day_passed_completes_it(
+    client: AsyncClient, db_session: AsyncSession, storage: ObjectStorage
+):
+    member = await _create_user(db_session)
+    challenge = await _create_challenge(
+        db_session,
+        member,
+        duration_type=DurationType.DAYS_10,
+        total_days=10,
+        start_date=_utc_today() - timedelta(days=15),
+        end_date=_utc_today() - timedelta(days=6),
+        joined_days_ago=15,
+    )
+
+    response = await client.get(f"/api/v1/challenges/{challenge.id}", headers=await _login(client, member))
+
+    assert response.json()["challenge"]["status"] == "COMPLETED"
+
+
+async def test_a_challenge_still_running_is_not_completed(
+    client: AsyncClient, db_session: AsyncSession, storage: ObjectStorage
+):
+    member = await _create_user(db_session)
+    challenge = await _create_challenge(
+        db_session,
+        member,
+        duration_type=DurationType.DAYS_10,
+        total_days=10,
+        start_date=_utc_today() - timedelta(days=2),
+        end_date=_utc_today() + timedelta(days=7),
+        joined_days_ago=2,
+    )
+
+    response = await client.get(f"/api/v1/challenges/{challenge.id}", headers=await _login(client, member))
+
+    assert response.json()["challenge"]["status"] == "ACTIVE"
