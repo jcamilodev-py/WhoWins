@@ -30,8 +30,8 @@ RESET_TOKEN_TTL = timedelta(hours=1)
 
 @lru_cache(maxsize=1)
 def _dummy_password_hash() -> str:
-    """Hash contra el que se verifica cuando el usuario no existe, para que el
-    coste en tiempo de /login sea el mismo exista o no la cuenta."""
+    """The hash verified against when the user does not exist, so /login costs
+    the same time whether or not the account is real."""
     return hash_password("dummy-password-for-constant-time-comparison")
 
 
@@ -94,6 +94,10 @@ class AuthService:
             auth_provider=AuthProvider.LOCAL,
             email_verified=False,
         )
+        # Left to the column default (UTC) when the client does not know it yet;
+        # the profile can fix it later.
+        if request.timezone is not None:
+            user.timezone = request.timezone
         db.add(user)
         await db.commit()
         await db.refresh(user)
@@ -103,8 +107,8 @@ class AuthService:
     async def authenticate_user(self, db: AsyncSession, email: str, password: str) -> User:
         user = await self.repository.find_by_email(db, email)
 
-        # Se verifica siempre, incluso sin usuario, para no filtrar por tiempo
-        # de respuesta que emails estan registrados.
+        # Always verified, even with no user, so the response time does not
+        # reveal which emails are registered.
         stored_hash = user.password if user is not None and user.password is not None else _dummy_password_hash()
         password_matches = verify_password(password, stored_hash)
 
