@@ -3,13 +3,24 @@ from typing import Annotated
 from uuid import UUID
 from zoneinfo import available_timezones
 
-from pydantic import BaseModel, ConfigDict, EmailStr, Field, StringConstraints, field_validator
+from pydantic import AfterValidator, BaseModel, ConfigDict, EmailStr, Field, StringConstraints
 from pydantic.alias_generators import to_camel
 
 from app.user.models import AVATAR_KEY_MAX_LENGTH, DISPLAY_NAME_MAX_LENGTH, AuthProvider, Role
 
 # Stripping runs before the length check, so a name of only spaces is rejected.
 DisplayName = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=DISPLAY_NAME_MAX_LENGTH)]
+
+
+def _validate_timezone(value: str) -> str:
+    if value not in available_timezones():
+        raise ValueError("Invalid IANA timezone identifier.")
+    return value
+
+
+# Every deadline in WhoWins is local to the member, so a wrong timezone silently
+# moves their midnight. Validated wherever it is accepted, never only on update.
+Timezone = Annotated[str, AfterValidator(_validate_timezone)]
 
 
 class UserResponse(BaseModel):
@@ -34,14 +45,7 @@ class UserUpdateMe(BaseModel):
     model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
 
     display_name: DisplayName | None = None
-    timezone: str | None = None
-
-    @field_validator("timezone")
-    @classmethod
-    def validate_timezone(cls, v: str | None) -> str | None:
-        if v is not None and v not in available_timezones():
-            raise ValueError("Invalid IANA timezone identifier.")
-        return v
+    timezone: Timezone | None = None
 
 
 class AvatarUploadRequest(BaseModel):
