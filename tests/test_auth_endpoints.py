@@ -1,10 +1,19 @@
 import uuid
 
 from httpx import AsyncClient
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.user.models import User
 
 
 def _generate_random_email() -> str:
     return f"user_{uuid.uuid4().hex[:8]}@test.com"
+
+
+async def _find_user(db: AsyncSession, email: str) -> User | None:
+    result = await db.execute(select(User).where(User.email == email))
+    return result.scalar_one_or_none()
 
 
 def _register_payload(email: str, password: str = "securepassword123", display_name: str = "Test User") -> dict:
@@ -138,3 +147,38 @@ async def test_get_me_authorized_with_token(client: AsyncClient):
     assert profile["email"] == email
     assert profile["displayName"] == "Sofía"
     assert profile["active"] is True
+
+
+# --- timezone at registration ---
+
+
+async def test_register_stores_the_timezone_the_client_sends(client: AsyncClient, db_session: AsyncSession):
+    email = _generate_random_email()
+    payload = _register_payload(email) | {"timezone": "America/Bogota"}
+
+    response = await client.post("/api/v1/auth/register", json=payload)
+
+    assert response.status_code == 201
+    user = await _find_user(db_session, email)
+    assert user is not None
+    assert user.timezone == "America/Bogota"
+
+
+async def test_register_without_a_timezone_falls_back_to_utc(client: AsyncClient, db_session: AsyncSession):
+    email = _generate_random_email()
+
+    await client.post("/api/v1/auth/register", json=_register_payload(email))
+
+    user = await _find_user(db_session, email)
+    assert user is not None
+    # The account still works; its midnight is simply UTC until the profile says otherwise.
+    assert user.timezone == "UTC"
+
+
+async def test_register_with_an_invalid_timezone_returns_422(client: AsyncClient):
+    payload = _register_payload(_generate_random_email()) | {"timezone": "Mars/Olympus_Mons"}
+
+    response = await client.post("/api/v1/auth/register", json=payload)
+
+    assert response.status_code == 422
+    assert response.json()["detail"][0]["loc"] == ["body", "timezone"]
