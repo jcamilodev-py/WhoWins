@@ -2,6 +2,7 @@ from zoneinfo import ZoneInfo
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.challenge.lifecycle import next_status
 from app.challenge.models import Challenge
 from app.shared.timezones import local_today
 from app.streaks.engine import ChallengeFacts, MemberFacts, StreakResult, calculate
@@ -13,11 +14,12 @@ class StreakService:
         self.repository = repository
 
     async def recalculate(self, db: AsyncSession, challenge: Challenge) -> StreakResult:
-        """Recomputes every streak for a challenge and stores the answer.
+        """Recomputes a challenge's derived state and stores the answer.
 
-        The stored counters are a cache of what the check-ins already say, so
-        this is safe to call as often as needed: it is idempotent, and running
-        it twice in a row changes nothing the second time.
+        That is every streak and score, plus the status the calendar forces. All
+        of it is a cache of what the check-ins and the dates already say, so this
+        is safe to call as often as needed: it is idempotent, and running it
+        twice in a row changes nothing the second time.
         """
         rows = await self.repository.find_members_with_users(db, challenge.id)
         counting_days = await self.repository.find_counting_days(db, challenge.id)
@@ -47,6 +49,14 @@ class StreakService:
         )
 
         changed = False
+        status = next_status(
+            challenge.status, challenge.start_date, challenge.end_date, [member.local_today for member in members]
+        )
+        if challenge.status != status:
+            challenge.status = status
+            db.add(challenge)
+            changed = True
+
         if (challenge.current_group_streak, challenge.best_group_streak) != (
             result.current_group_streak,
             max(result.best_group_streak, challenge.best_group_streak),
