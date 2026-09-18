@@ -6,7 +6,7 @@ from uuid import UUID
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints
 from pydantic.alias_generators import to_camel
 
-from app.checkin.models import PHOTO_KEY_MAX_LENGTH, CheckInStatus
+from app.checkin.models import PHOTO_KEY_MAX_LENGTH, REVIEW_COMMENT_MAX_LENGTH, CheckInStatus
 
 
 class DayStatus(StrEnum):
@@ -83,3 +83,33 @@ class TodayStatusResponse(BaseModel):
     challenge_id: UUID
     viewer_local_date: date
     members: list[MemberDayStatusResponse]
+
+
+class ReviewVoteRequest(BaseModel):
+    model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
+
+    is_approved: bool = Field(..., description="Whether the proof is accepted")
+    comment: Annotated[str, StringConstraints(strip_whitespace=True, max_length=REVIEW_COMMENT_MAX_LENGTH)] | None = (
+        None
+    )
+
+
+class CheckInUnderReviewResponse(BaseModel):
+    model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
+
+    id: UUID
+    challenge_id: UUID
+    # The author. Their own proof is never theirs to vote on.
+    user_id: UUID
+    display_name: str | None
+    local_date: date
+    photo_url: str
+    status: CheckInStatus
+    review_closes_at: datetime | None
+    submitted_at: datetime
+    approvals: int
+    rejections: int
+    # Members other than the author; the majority is counted over these.
+    eligible_reviewers: int
+    # What the caller voted, or null if they have not voted yet.
+    my_vote: bool | None
