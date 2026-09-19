@@ -154,7 +154,7 @@ erDiagram
 ### Authentication & Users
 | Method | Endpoint | Description |
 |---|---|---|
-| `POST` | `/api/v1/auth/register` | Register new user with email & password |
+| `POST` | `/api/v1/auth/register` | Register with email, password, display name and (optionally) IANA timezone |
 | `POST` | `/api/v1/auth/login` | Authenticate and obtain JWT tokens |
 | `POST` | `/api/v1/auth/refresh` | Refresh access token using refresh token |
 | `POST` | `/api/v1/auth/logout` | Revoke active session |
@@ -175,9 +175,10 @@ erDiagram
 | `POST` | `/api/v1/challenges/preview` | Preview a challenge by invite code before joining (join status, inherited missed days) |
 | `POST` | `/api/v1/challenges/join` | Join a challenge via invite code |
 | `GET` | `/api/v1/challenges` | List active challenges for current user |
-| `GET` | `/api/v1/challenges/{id}` | Challenge dashboard, streaks & leaderboard |
-| `PATCH` | `/api/v1/challenges/{id}/members/{user_id}/role` | Promote/demote members (creator/admin) |
-| `DELETE` | `/api/v1/challenges/{id}/members/{user_id}` | Remove member from challenge |
+| `GET` | `/api/v1/challenges/{id}` | Challenge dashboard: streaks, leaderboard with photos, and who last broke the group streak |
+| `GET` | `/api/v1/challenges/{id}/history` | Day-by-day outcome per member, for the heatmap (`?days=`, 1–366, default 60) |
+| `PATCH` | `/api/v1/challenges/{id}/members/{user_id}/role` | *Planned:* promote/demote members (creator/admin) |
+| `DELETE` | `/api/v1/challenges/{id}/members/{user_id}` | *Planned:* remove member from challenge |
 
 ### Check-ins & Media
 | Method | Endpoint | Description |
@@ -185,8 +186,17 @@ erDiagram
 | `POST` | `/api/v1/challenges/{id}/checkins/upload-url` | Presigned PUT URL for the daily proof (direct upload) |
 | `POST` | `/api/v1/challenges/{id}/checkins/confirm` | Confirm the upload and record the check-in |
 | `GET` | `/api/v1/challenges/{id}/checkins/today` | Today's status for every member, each on their own calendar day |
-| `POST` | `/api/v1/checkins/{checkin_id}/review` | Peer review photo (approve/reject) |
-| `GET` | `/api/v1/challenges/{id}/collage` | Download photo collage upon challenge completion |
+| `GET` | `/api/v1/challenges/{id}/checkins/pending` | Proofs still waiting for the group's vote |
+| `PUT` | `/api/v1/challenges/{id}/checkins/{checkin_id}/review` | Cast or change a vote (majority of the other members; a tie approves) |
+| `GET` | `/api/v1/challenges/{id}/collage` | *Planned:* photo collage upon challenge completion |
+
+### Object storage in production
+
+The browser uploads photos **straight to the bucket** with a presigned PUT, from the frontend's origin. Locally MinIO answers CORS for any origin by default, so nothing needs configuring. On S3, R2 or Supabase Storage the bucket needs an explicit CORS rule, or every upload fails in the browser while working from curl:
+
+```json
+[{"AllowedOrigins": ["https://app.example.com"], "AllowedMethods": ["PUT", "GET"], "AllowedHeaders": ["content-type"]}]
+```
 
 ---
 
