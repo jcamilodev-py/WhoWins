@@ -98,6 +98,8 @@ class LeaderboardEntryResponse(BaseModel):
     user_id: UUID
     # Null for accounts that have not set a name yet; clients show a fallback.
     display_name: str | None
+    # Signed and short-lived like every photo URL; null means show initials.
+    avatar_url: str | None = None
     role: MemberRole
     current_individual_streak: int
     best_individual_streak: int
