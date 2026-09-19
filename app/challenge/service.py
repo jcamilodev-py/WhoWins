@@ -27,6 +27,7 @@ from app.challenge.schemas import (
     MyChallengeResponse,
 )
 from app.shared.exception.errors import BusinessException, DuplicateResourceException, ResourceNotFoundException
+from app.shared.storage.object_storage import object_storage
 from app.streaks.service import streak_service
 from app.user.models import User
 
@@ -221,7 +222,7 @@ class ChallengeService:
 
         # 404 rather than 403 for non-members, so a private challenge's existence
         # is not confirmed to someone who merely has its id.
-        if challenge is None or all(member.user_id != user.id for member, _ in rows):
+        if challenge is None or all(member.user_id != user.id for member, *_ in rows):
             raise ResourceNotFoundException("Challenge", "id", challenge_id)
 
         # Deduced on read: nothing schedules this, so the only moment the scores
@@ -232,7 +233,7 @@ class ChallengeService:
         leaderboard: list[LeaderboardEntryResponse] = []
         rank = 0
         previous_missed: int | None = None
-        for position, (member, display_name) in enumerate(rows, start=1):
+        for position, (member, display_name, avatar_key) in enumerate(rows, start=1):
             if member.missed_days_count != previous_missed:
                 rank = position
                 previous_missed = member.missed_days_count
@@ -241,6 +242,7 @@ class ChallengeService:
                     rank=rank,
                     user_id=member.user_id,
                     display_name=display_name,
+                    avatar_url=object_storage.create_download_url(avatar_key) if avatar_key else None,
                     role=member.role,
                     current_individual_streak=member.current_individual_streak,
                     best_individual_streak=member.best_individual_streak,
