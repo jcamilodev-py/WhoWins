@@ -1,12 +1,14 @@
+from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Request, status
+from fastapi import APIRouter, Query, Request, status
 
 from app.auth.dependencies import CurrentUser
 from app.challenge.repository import ChallengeMemberRepository, ChallengeRepository
 from app.challenge.schemas import (
     ChallengeCreate,
     ChallengeDetailResponse,
+    ChallengeHistoryResponse,
     ChallengePreviewResponse,
     ChallengeResponse,
     JoinChallengeRequest,
@@ -29,6 +31,18 @@ async def list_my_challenges(db: DBSession, current_user: CurrentUser):
 @router.get("/{challenge_id}", response_model=ChallengeDetailResponse)
 async def get_challenge(challenge_id: UUID, db: DBSession, current_user: CurrentUser):
     return await challenge_service.get_detail(db, current_user, challenge_id)
+
+
+@router.get("/{challenge_id}/history", response_model=ChallengeHistoryResponse)
+async def get_challenge_history(
+    challenge_id: UUID,
+    db: DBSession,
+    current_user: CurrentUser,
+    # Enough for any fixed-length challenge by default; bounded because an
+    # indefinite one keeps adding days forever.
+    days: Annotated[int, Query(ge=1, le=366)] = 60,
+):
+    return await challenge_service.get_history(db, current_user, challenge_id, days)
 
 
 @router.post("", response_model=ChallengeResponse, status_code=status.HTTP_201_CREATED)
