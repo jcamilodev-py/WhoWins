@@ -64,11 +64,11 @@ class ChallengeMemberRepository(BaseRepository[ChallengeMember]):
 
     async def find_leaderboard(
         self, db: AsyncSession, challenge_id: UUID
-    ) -> Sequence[Row[tuple[ChallengeMember, str | None]]]:
-        """Each member with their display name, fewest missed days first."""
+    ) -> Sequence[Row[tuple[ChallengeMember, str | None, str | None]]]:
+        """Each member with their display name and photo key, fewest missed days first."""
         # Ties stay in join order until a tie-breaker is defined.
         result = await db.execute(
-            select(ChallengeMember, User.display_name)
+            select(ChallengeMember, User.display_name, User.avatar_key)
             .join(User, User.id == ChallengeMember.user_id)
             .where(ChallengeMember.challenge_id == challenge_id)
             .order_by(
