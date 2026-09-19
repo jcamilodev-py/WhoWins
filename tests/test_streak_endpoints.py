@@ -339,3 +339,127 @@ async def test_the_challenge_list_shows_refreshed_scores(
     item = next(item for item in response.json() if item["challenge"]["id"] == str(challenge.id))
     assert item["challenge"]["status"] == "ACTIVE"
     assert item["myMembership"]["missedDaysCount"] == 2
+
+
+# --- who broke it ---
+
+
+async def test_the_challenge_names_who_broke_the_group_streak(client: AsyncClient, db_session: AsyncSession):
+    ana = await _create_user(db_session, display_name="Ana")
+    bob = await _create_user(db_session, display_name="Bob")
+    yesterday = _utc_today() - timedelta(days=1)
+    challenge = await _create_challenge(db_session, ana, members=[bob], start_date=yesterday, joined_days_ago=1)
+    # Ana covered yesterday; Bob did not.
+    db_session.add(
+        CheckIn(
+            challenge_id=challenge.id,
+            user_id=ana.id,
+            local_date=yesterday,
+            photo_key=f"challenges/{challenge.id}/checkins/{ana.id}/proof.jpg",
+            status=CheckInStatus.APPROVED,
+        )
+    )
+    await db_session.commit()
+
+    response = await client.get(f"/api/v1/challenges/{challenge.id}", headers=await _login(client, ana))
+
+    last_break = response.json()["lastGroupBreak"]
+    assert last_break["day"] == yesterday.isoformat()
+    assert [member["displayName"] for member in last_break["members"]] == ["Bob"]
+
+
+async def test_a_group_that_never_lost_a_day_has_no_break(client: AsyncClient, db_session: AsyncSession):
+    member = await _create_user(db_session)
+    challenge = await _create_challenge(db_session, member)
+
+    response = await client.get(f"/api/v1/challenges/{challenge.id}", headers=await _login(client, member))
+
+    assert response.json()["lastGroupBreak"] is None
+
+
+# --- day by day ---
+
+
+async def test_the_history_draws_every_day_for_every_member(client: AsyncClient, db_session: AsyncSession):
+    ana = await _create_user(db_session, display_name="Ana")
+    today = _utc_today()
+    yesterday = today - timedelta(days=1)
+    before_yesterday = today - timedelta(days=2)
+    # Every day is active except the day before yesterday, which is a rest day.
+    challenge = await _create_challenge(
+        db_session,
+        ana,
+        start_date=before_yesterday,
+        active_days=[day for day in range(7) if day != before_yesterday.weekday()],
+        joined_days_ago=2,
+    )
+    db_session.add(
+        CheckIn(
+            challenge_id=challenge.id,
+            user_id=ana.id,
+            local_date=yesterday,
+            photo_key=f"challenges/{challenge.id}/checkins/{ana.id}/proof.jpg",
+            status=CheckInStatus.APPROVED,
+        )
+    )
+    await db_session.commit()
+
+    response = await client.get(f"/api/v1/challenges/{challenge.id}/history", headers=await _login(client, ana))
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["dates"] == [before_yesterday.isoformat(), yesterday.isoformat(), today.isoformat()]
+    outcomes = [day["outcome"] for day in body["members"][0]["days"]]
+    assert outcomes == ["REST_DAY", "COVERED", "OPEN"]
+
+
+async def test_the_history_marks_days_before_joining(client: AsyncClient, db_session: AsyncSession):
+    creator = await _create_user(db_session, display_name="Creator")
+    latecomer = await _create_user(db_session, display_name="Latecomer")
+    today = _utc_today()
+    challenge = await _create_challenge(db_session, creator, start_date=today - timedelta(days=2), joined_days_ago=2)
+    # Joined today: the two days before are not theirs to answer for.
+    db_session.add(ChallengeMember(challenge_id=challenge.id, user_id=latecomer.id))
+    await db_session.commit()
+
+    response = await client.get(f"/api/v1/challenges/{challenge.id}/history", headers=await _login(client, latecomer))
+
+    rows = {member["displayName"]: member for member in response.json()["members"]}
+    assert [day["outcome"] for day in rows["Latecomer"]["days"]] == ["NOT_JOINED", "NOT_JOINED", "OPEN"]
+    assert [day["outcome"] for day in rows["Creator"]["days"]] == ["MISSED", "MISSED", "OPEN"]
+
+
+async def test_the_history_returns_only_the_most_recent_days_asked_for(client: AsyncClient, db_session: AsyncSession):
+    member = await _create_user(db_session)
+    challenge = await _create_challenge(
+        db_session, member, start_date=_utc_today() - timedelta(days=10), joined_days_ago=10
+    )
+
+    response = await client.get(
+        f"/api/v1/challenges/{challenge.id}/history?days=3", headers=await _login(client, member)
+    )
+
+    dates = response.json()["dates"]
+    assert len(dates) == 3
+    assert dates[-1] == _utc_today().isoformat()
+
+
+async def test_the_history_is_members_only(client: AsyncClient, db_session: AsyncSession):
+    creator = await _create_user(db_session)
+    challenge = await _create_challenge(db_session, creator)
+    outsider = await _create_user(db_session)
+
+    response = await client.get(f"/api/v1/challenges/{challenge.id}/history", headers=await _login(client, outsider))
+
+    assert response.status_code == 404
+
+
+async def test_the_history_rejects_an_unbounded_request(client: AsyncClient, db_session: AsyncSession):
+    member = await _create_user(db_session)
+    challenge = await _create_challenge(db_session, member)
+
+    response = await client.get(
+        f"/api/v1/challenges/{challenge.id}/history?days=5000", headers=await _login(client, member)
+    )
+
+    assert response.status_code == 422
