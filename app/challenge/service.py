@@ -18,16 +18,23 @@ from app.challenge.repository import ChallengeMemberRepository, ChallengeReposit
 from app.challenge.schemas import (
     ChallengeCreate,
     ChallengeDetailResponse,
+    ChallengeHistoryResponse,
     ChallengeMemberResponse,
     ChallengePreviewResponse,
     ChallengeResponse,
+    GroupBreakMemberResponse,
+    GroupBreakResponse,
+    HistoryDayResponse,
+    HistoryOutcome,
     JoinChallengeRequest,
     JoinStatus,
     LeaderboardEntryResponse,
+    MemberHistoryResponse,
     MyChallengeResponse,
 )
 from app.shared.exception.errors import BusinessException, DuplicateResourceException, ResourceNotFoundException
 from app.shared.storage.object_storage import object_storage
+from app.streaks.engine import DayOutcome
 from app.streaks.service import streak_service
 from app.user.models import User
 
@@ -73,6 +80,26 @@ def _missed_days_on_join(challenge: Challenge, today: date) -> int:
         return 0
     # Today is excluded: the new member can still check in before midnight.
     return _count_active_days(challenge.start_date, today, challenge.active_days)
+
+
+def _avatar_url(avatar_key: str | None) -> str | None:
+    return object_storage.create_download_url(avatar_key) if avatar_key else None
+
+
+_OUTCOME_NAMES = {
+    DayOutcome.COVERED: HistoryOutcome.COVERED,
+    DayOutcome.MISSED: HistoryOutcome.MISSED,
+    DayOutcome.UNDECIDED: HistoryOutcome.OPEN,
+}
+
+
+def _history_outcome(day: date, active_days: list[int], member_days: dict[date, DayOutcome]) -> HistoryOutcome:
+    if day.weekday() not in active_days:
+        return HistoryOutcome.REST_DAY
+    if day in member_days:
+        return _OUTCOME_NAMES[member_days[day]]
+    # An active day the engine did not hold this member to: it ran before they joined.
+    return HistoryOutcome.NOT_JOINED
 
 
 class ChallengeService:
@@ -227,7 +254,7 @@ class ChallengeService:
 
         # Deduced on read: nothing schedules this, so the only moment the scores
         # can be trusted is the moment someone asks for them.
-        await streak_service.recalculate(db, challenge)
+        result = await streak_service.recalculate(db, challenge)
         rows = await self.member_repository.find_leaderboard(db, challenge_id)
 
         leaderboard: list[LeaderboardEntryResponse] = []
@@ -242,7 +269,7 @@ class ChallengeService:
                     rank=rank,
                     user_id=member.user_id,
                     display_name=display_name,
-                    avatar_url=object_storage.create_download_url(avatar_key) if avatar_key else None,
+                    avatar_url=_avatar_url(avatar_key),
                     role=member.role,
                     current_individual_streak=member.current_individual_streak,
                     best_individual_streak=member.best_individual_streak,
@@ -251,4 +278,68 @@ class ChallengeService:
                 )
             )
 
-        return ChallengeDetailResponse(challenge=ChallengeResponse.model_validate(challenge), leaderboard=leaderboard)
+        last_group_break = None
+        if result.last_group_break is not None:
+            people = {member.user_id: (display_name, avatar_key) for member, display_name, avatar_key in rows}
+            last_group_break = GroupBreakResponse(
+                day=result.last_group_break.day,
+                members=[
+                    GroupBreakMemberResponse(
+                        user_id=user_id,
+                        display_name=people[user_id][0],
+                        avatar_url=_avatar_url(people[user_id][1]),
+                    )
+                    for user_id in result.last_group_break.user_ids
+                    # A member who has since left is no longer anyone's to name.
+                    if user_id in people
+                ],
+            )
+
+        return ChallengeDetailResponse(
+            challenge=ChallengeResponse.model_validate(challenge),
+            leaderboard=leaderboard,
+            last_group_break=last_group_break,
+        )
+
+    async def get_history(
+        self, db: AsyncSession, user: User, challenge_id: UUID, days: int
+    ) -> ChallengeHistoryResponse:
+        """Day by day, for every member: what the heatmap draws.
+
+        Only the most recent `days` calendar days are returned. An indefinite
+        challenge keeps growing, and a response without a bound would keep
+        growing with it.
+        """
+        challenge = await self.challenge_repository.find_by_id(db, challenge_id)
+        rows = await self.member_repository.find_leaderboard(db, challenge_id) if challenge else []
+        if challenge is None or all(member.user_id != user.id for member, *_ in rows):
+            raise ResourceNotFoundException("Challenge", "id", challenge_id)
+
+        result = await streak_service.recalculate(db, challenge)
+
+        dates: list[date] = []
+        if result.last_day is not None:
+            first_day = max(challenge.start_date, result.last_day - timedelta(days=days - 1))
+            dates = [first_day + timedelta(days=offset) for offset in range((result.last_day - first_day).days + 1)]
+
+        # Join order, not ranking order: a heatmap reads better when rows do not
+        # jump around as the scores change.
+        members_by_join = sorted(rows, key=lambda row: (row[0].joined_at, row[0].id))
+        return ChallengeHistoryResponse(
+            challenge_id=challenge_id,
+            dates=dates,
+            members=[
+                MemberHistoryResponse(
+                    user_id=member.user_id,
+                    display_name=display_name,
+                    days=[
+                        HistoryDayResponse(
+                            day=day,
+                            outcome=_history_outcome(day, challenge.active_days, result.members[member.id].days),
+                        )
+                        for day in dates
+                    ],
+                )
+                for member, display_name, _ in members_by_join
+            ],
+        )
