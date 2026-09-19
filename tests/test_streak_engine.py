@@ -7,7 +7,7 @@ No database and no clock: every "today" is passed in, so a test that says
 import uuid
 from datetime import date
 
-from app.streaks.engine import ChallengeFacts, MemberFacts, calculate
+from app.streaks.engine import ChallengeFacts, DayOutcome, MemberFacts, calculate
 
 MONDAY = date(2026, 9, 7)
 TUESDAY = date(2026, 9, 8)
@@ -203,3 +203,74 @@ def test_a_challenge_without_members_scores_nothing():
 
     assert result.current_group_streak == 0
     assert result.members == {}
+
+
+# --- who broke it ---
+
+
+def test_a_group_that_never_lost_a_day_has_no_break():
+    ana = _member(local_today=TUESDAY)
+
+    result = calculate(_challenge(), [ana], _covered((ana, MONDAY), (ana, TUESDAY)))
+
+    assert result.last_group_break is None
+
+
+def test_the_break_names_the_member_who_let_the_day_slip():
+    ana = _member(local_today=WEDNESDAY)
+    bob = _member(local_today=WEDNESDAY)
+    covered = _covered((ana, MONDAY), (bob, MONDAY), (ana, TUESDAY), (ana, WEDNESDAY), (bob, WEDNESDAY))
+
+    result = calculate(_challenge(), [ana, bob], covered)
+
+    assert result.last_group_break is not None
+    assert result.last_group_break.day == TUESDAY
+    assert result.last_group_break.user_ids == [bob.user_id]
+
+
+def test_the_break_is_the_most_recent_one():
+    ana = _member(local_today=FRIDAY)
+    bob = _member(local_today=FRIDAY)
+    # Bob missed Tuesday, then Ana missed Thursday.
+    covered = _covered(
+        (ana, MONDAY), (bob, MONDAY), (ana, TUESDAY), (ana, WEDNESDAY), (bob, WEDNESDAY), (bob, THURSDAY)
+    )
+
+    result = calculate(_challenge(), [ana, bob], covered)
+
+    assert result.last_group_break is not None
+    assert result.last_group_break.day == THURSDAY
+    assert result.last_group_break.user_ids == [ana.user_id]
+
+
+def test_everyone_who_missed_the_same_day_is_named():
+    ana = _member(local_today=TUESDAY)
+    bob = _member(local_today=TUESDAY)
+
+    result = calculate(_challenge(), [ana, bob], set())
+
+    assert result.last_group_break is not None
+    assert set(result.last_group_break.user_ids) == {ana.user_id, bob.user_id}
+
+
+def test_a_day_still_running_is_not_a_break_yet():
+    ana = _member(local_today=MONDAY)
+
+    result = calculate(_challenge(), [ana], set())
+
+    # Ana can still upload before her midnight: nothing is broken.
+    assert result.last_group_break is None
+
+
+# --- day by day ---
+
+
+def test_each_member_carries_the_outcome_of_every_day_they_answered_for():
+    ana = _member(local_today=WEDNESDAY, joined=TUESDAY)
+
+    result = calculate(_challenge(), [ana], _covered((ana, TUESDAY)))
+
+    assert result.members[ana.member_id].days == {
+        TUESDAY: DayOutcome.COVERED,
+        WEDNESDAY: DayOutcome.UNDECIDED,
+    }
