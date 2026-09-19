@@ -107,11 +107,66 @@ class LeaderboardEntryResponse(BaseModel):
     joined_at: datetime
 
 
+class GroupBreakMemberResponse(BaseModel):
+    model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
+
+    user_id: UUID
+    display_name: str | None
+    avatar_url: str | None
+
+
+class GroupBreakResponse(BaseModel):
+    model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
+
+    # The most recent day the group lost, and who let it slip. Naming them is a
+    # product decision: the social pressure is the point. Called "day" rather
+    # than "date" so the field does not shadow the type it is declared with.
+    day: date
+    members: list[GroupBreakMemberResponse]
+
+
 class ChallengeDetailResponse(BaseModel):
     model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
 
     challenge: ChallengeResponse
     leaderboard: list[LeaderboardEntryResponse]
+    # Null while the group has never lost a day.
+    last_group_break: GroupBreakResponse | None = None
+
+
+class HistoryOutcome(StrEnum):
+    COVERED = "COVERED"
+    MISSED = "MISSED"
+    # Not decided yet: still today for that member, or not reached yet.
+    OPEN = "OPEN"
+    # Not an active day of the challenge.
+    REST_DAY = "REST_DAY"
+    # An active day that ran before this member joined; nothing was owed.
+    NOT_JOINED = "NOT_JOINED"
+
+
+class HistoryDayResponse(BaseModel):
+    model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
+
+    day: date
+    outcome: HistoryOutcome
+
+
+class MemberHistoryResponse(BaseModel):
+    model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
+
+    user_id: UUID
+    display_name: str | None
+    days: list[HistoryDayResponse]
+
+
+class ChallengeHistoryResponse(BaseModel):
+    model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
+
+    challenge_id: UUID
+    # Every calendar day covered by the response, oldest first, rest days included.
+    dates: list[date]
+    members: list[MemberHistoryResponse]
 
 
 class JoinStatus(StrEnum):
