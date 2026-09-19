@@ -146,12 +146,17 @@ async def test_confirming_another_users_upload_returns_400(
 
 
 async def test_oversized_upload_is_rejected_and_removed_from_storage(
-    client: AsyncClient, db_session: AsyncSession, storage: ObjectStorage, monkeypatch: pytest.MonkeyPatch
+    client: AsyncClient,
+    db_session: AsyncSession,
+    storage: ObjectStorage,
+    uploaded_keys: list[str],
+    monkeypatch: pytest.MonkeyPatch,
 ):
     user = await _create_user(db_session)
     headers = await _login(client, user)
-    keys: list[str] = []
-    upload = await _upload_avatar(client, headers, keys)
+    # Registered for cleanup even though the code under test should delete it:
+    # if that code is ever broken, the test must fail without leaving the file behind.
+    upload = await _upload_avatar(client, headers, uploaded_keys)
     monkeypatch.setattr(settings, "storage_max_upload_bytes", len(IMAGE_BYTES) - 1)
 
     response = await client.put("/api/v1/users/me/avatar", json={"key": upload["key"]}, headers=headers)
@@ -178,11 +183,13 @@ async def test_replacing_the_avatar_deletes_the_previous_file(
 
 
 async def test_deleting_the_avatar_clears_the_url_and_the_file(
-    client: AsyncClient, db_session: AsyncSession, storage: ObjectStorage
+    client: AsyncClient, db_session: AsyncSession, storage: ObjectStorage, uploaded_keys: list[str]
 ):
     user = await _create_user(db_session)
     headers = await _login(client, user)
-    upload = await _upload_avatar(client, headers, [])
+    # Registered for cleanup even though the endpoint should delete it: if the
+    # deletion is ever broken, the test must fail without leaving the file behind.
+    upload = await _upload_avatar(client, headers, uploaded_keys)
     await client.put("/api/v1/users/me/avatar", json={"key": upload["key"]}, headers=headers)
 
     response = await client.delete("/api/v1/users/me/avatar", headers=headers)
