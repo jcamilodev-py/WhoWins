@@ -319,3 +319,23 @@ async def test_a_challenge_still_running_is_not_completed(
     response = await client.get(f"/api/v1/challenges/{challenge.id}", headers=await _login(client, member))
 
     assert response.json()["challenge"]["status"] == "ACTIVE"
+
+
+async def test_the_challenge_list_shows_refreshed_scores(
+    client: AsyncClient, db_session: AsyncSession, storage: ObjectStorage
+):
+    member = await _create_user(db_session)
+    # Two days went by with nothing uploaded, and the status was never moved.
+    challenge = await _create_challenge(
+        db_session,
+        member,
+        start_date=_utc_today() - timedelta(days=2),
+        status=ChallengeStatus.PENDING,
+        joined_days_ago=2,
+    )
+
+    response = await client.get("/api/v1/challenges", headers=await _login(client, member))
+
+    item = next(item for item in response.json() if item["challenge"]["id"] == str(challenge.id))
+    assert item["challenge"]["status"] == "ACTIVE"
+    assert item["myMembership"]["missedDaysCount"] == 2
