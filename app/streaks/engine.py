@@ -14,7 +14,7 @@ Two ideas drive every rule here:
   uploaded, but it only grows once every member is covered for that day.
 """
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import date, timedelta
 from enum import Enum, auto
 from uuid import UUID
@@ -58,6 +58,19 @@ class MemberStreaks:
     current_individual_streak: int
     best_individual_streak: int
     missed_days_count: int
+    # Every active day this member was answerable for, and how it went. What the
+    # scores above are counted from, kept so the day-by-day history can be shown.
+    days: dict[date, DayOutcome] = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
+class GroupBreak:
+    """The most recent day the group lost, and who let it slip."""
+
+    day: date
+    # Members, by user id, who were answerable that day and did not cover it.
+    # Usually one; several when more than one member missed the same day.
+    user_ids: list[UUID]
 
 
 @dataclass(frozen=True)
@@ -65,6 +78,11 @@ class StreakResult:
     current_group_streak: int
     best_group_streak: int
     members: dict[UUID, MemberStreaks]
+    # None while the group has never lost a day.
+    last_group_break: GroupBreak | None = None
+    # The last calendar day evaluated: the furthest-ahead member's today, capped
+    # at the end date. None when there is nobody to evaluate.
+    last_day: date | None = None
 
 
 def _active_days_in_range(challenge: ChallengeFacts, last_day: date) -> list[date]:
@@ -138,6 +156,7 @@ def calculate(challenge: ChallengeFacts, members: list[MemberFacts], covered: se
             best_individual_streak=_longest_run(outcomes),
             missed_days_count=member.inherited_missed_days
             + sum(1 for outcome in outcomes if outcome is DayOutcome.MISSED),
+            days=dict(zip(answerable, outcomes, strict=True)),
         )
 
     group_outcomes = [_group_outcome(members, day, covered) for day in days]
@@ -146,7 +165,27 @@ def calculate(challenge: ChallengeFacts, members: list[MemberFacts], covered: se
         current_group_streak=_walk_back(group_outcomes),
         best_group_streak=_longest_run(group_outcomes),
         members=member_results,
+        last_group_break=_last_break(members, days, group_outcomes, covered),
+        last_day=last_day,
     )
+
+
+def _last_break(
+    members: list[MemberFacts],
+    days: list[date],
+    group_outcomes: list[DayOutcome],
+    covered: set[tuple[UUID, date]],
+) -> GroupBreak | None:
+    """Who broke the group streak most recently. The product names them on purpose."""
+    for day, outcome in zip(reversed(days), reversed(group_outcomes), strict=True):
+        if outcome is DayOutcome.MISSED:
+            culprits = [
+                member.user_id
+                for member in members
+                if _is_answerable(member, day) and _member_outcome(member, day, covered) is DayOutcome.MISSED
+            ]
+            return GroupBreak(day=day, user_ids=culprits)
+    return None
 
 
 def _group_outcome(members: list[MemberFacts], day: date, covered: set[tuple[UUID, date]]) -> DayOutcome:
