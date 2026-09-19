@@ -160,8 +160,8 @@ erDiagram
 | `POST` | `/api/v1/auth/logout` | Revoke active session |
 | `POST` | `/api/v1/auth/forgot-password` | Request password reset email |
 | `POST` | `/api/v1/auth/reset-password` | Confirm password reset |
-| `GET` | `/api/v1/auth/google/login` | Initiate Google OAuth2 flow |
-| `GET` | `/api/v1/auth/google/callback`| Handle Google OAuth2 callback |
+| `GET` | `/oauth2/authorization/google` | Initiate Google OAuth2 flow (full-page navigation, no `/api/v1` prefix) |
+| `GET` | `/login/oauth2/code/google` | Handle Google OAuth2 callback |
 | `GET` | `/api/v1/users/me` | Fetch authenticated user profile & timezone |
 | `PATCH` | `/api/v1/users/me` | Update user settings (timezone, display name) |
 | `POST` | `/api/v1/users/me/avatar/upload-url` | Presigned PUT URL for the profile photo (browser uploads directly) |
