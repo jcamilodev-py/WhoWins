@@ -700,3 +700,22 @@ async def test_get_challenge_does_not_expose_member_emails(client: AsyncClient, 
     assert response.status_code == 200
     assert creator.email not in response.text
     assert member.email not in response.text
+
+
+async def test_get_challenge_leaderboard_shows_each_member_photo(client: AsyncClient, db_session: AsyncSession):
+    with_photo = await _create_user(db_session, display_name="Valentina")
+    without_photo = await _create_user(db_session, display_name="Juan")
+    with_photo.avatar_key = f"users/{with_photo.id}/avatar/photo.jpg"
+    await db_session.commit()
+    challenge = await _insert_challenge(db_session, with_photo)
+    db_session.add(ChallengeMember(challenge_id=challenge.id, user_id=with_photo.id, role=MemberRole.CREATOR))
+    db_session.add(ChallengeMember(challenge_id=challenge.id, user_id=without_photo.id))
+    await db_session.commit()
+
+    response = await client.get(f"/api/v1/challenges/{challenge.id}", headers=await _login(client, with_photo))
+
+    photos = {entry["displayName"]: entry["avatarUrl"] for entry in response.json()["leaderboard"]}
+    # A signed URL pointing at that exact photo, and nothing for the member without one.
+    assert f"users/{with_photo.id}/avatar/photo.jpg" in photos["Valentina"]
+    assert "X-Amz-Signature" in photos["Valentina"]
+    assert photos["Juan"] is None
