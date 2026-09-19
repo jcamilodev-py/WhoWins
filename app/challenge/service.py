@@ -57,8 +57,9 @@ def _join_status(challenge: Challenge, today: date) -> JoinStatus:
     """Whether a non-member can join today. Shared by join and preview so they never disagree."""
     if challenge.status in (ChallengeStatus.COMPLETED, ChallengeStatus.CANCELLED):
         return JoinStatus.FINISHED
-    # Compared against dates, not the stored status: nothing flips PENDING to
-    # ACTIVE yet, so status alone would report a started challenge as pending.
+    # Compared against dates, not the stored status: the status is only refreshed
+    # when someone reads the challenge, so between reads it can still lag behind
+    # the calendar. The dates are the source of truth.
     if challenge.end_date is not None and today > challenge.end_date:
         return JoinStatus.FINISHED
     if today >= challenge.start_date and challenge.late_join_policy == LateJoinPolicy.CLOSED:
@@ -197,6 +198,14 @@ class ChallengeService:
 
     async def list_for_user(self, db: AsyncSession, user: User) -> list[MyChallengeResponse]:
         rows = await self.challenge_repository.find_all_for_user(db, user.id)
+
+        # Refreshed here too, not only in the detail view: a list showing streaks
+        # and statuses that the detail then corrects is the same app telling the
+        # user two different things. The rows below are the same objects the
+        # recalculation updates, so they already carry the new numbers.
+        for challenge, _, _ in rows:
+            await streak_service.recalculate(db, challenge)
+
         return [
             MyChallengeResponse(
                 challenge=ChallengeResponse.model_validate(challenge),
