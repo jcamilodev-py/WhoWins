@@ -1,10 +1,10 @@
-from zoneinfo import ZoneInfo
+from datetime import UTC, datetime
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.challenge.lifecycle import next_status
 from app.challenge.models import Challenge
-from app.shared.timezones import local_today
+from app.shared.timezones import local_date
 from app.streaks.engine import ChallengeFacts, MemberFacts, StreakResult, calculate
 from app.streaks.repository import StreakRepository
 
@@ -25,15 +25,19 @@ class StreakService:
         counting_days = await self.repository.find_counting_days(db, challenge.id)
         covered = {(user_id, day) for user_id, day in counting_days}
 
+        # A cancelled challenge is scored as of the moment it was cancelled, so
+        # its streaks stay exactly as they were instead of collecting misses.
+        now = challenge.cancelled_at or datetime.now(UTC)
         members = [
             MemberFacts(
                 member_id=member.id,
                 user_id=member.user_id,
-                local_today=local_today(user.timezone),
+                local_today=local_date(now, user.timezone),
                 # The join instant seen from the member's own calendar: joining at
                 # 23:00 in Bogotá is a different day than the UTC timestamp shows.
-                joined_local_date=member.joined_at.astimezone(ZoneInfo(user.timezone)).date(),
+                joined_local_date=local_date(member.joined_at, user.timezone),
                 inherited_missed_days=member.inherited_missed_days,
+                left_local_date=local_date(member.left_at, user.timezone) if member.left_at else None,
             )
             for member, user in rows
         ]
@@ -50,7 +54,10 @@ class StreakService:
 
         changed = False
         status = next_status(
-            challenge.status, challenge.start_date, challenge.end_date, [member.local_today for member in members]
+            challenge.status,
+            challenge.start_date,
+            challenge.end_date,
+            [member.local_today for member in members if member.left_local_date is None],
         )
         if challenge.status != status:
             challenge.status = status
