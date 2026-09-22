@@ -189,8 +189,8 @@ class AuthService:
         db.add(user)
         await db.commit()
 
-        # Fuera del ciclo de request: ni un fallo de SMTP ni la latencia del
-        # envio pueden revelar si el email existe.
+        # Outside the request: neither an SMTP failure nor the sending delay may
+        # reveal whether the email exists.
         background_tasks.add_task(self._send_reset_email, user.email, reset_token)
 
     @staticmethod
@@ -211,8 +211,8 @@ class AuthService:
         user.password = hash_password(request.new_password)
         user.reset_token = None
         user.reset_token_expiry = None
-        # Invalida cualquier sesion abierta: si la cuenta estaba comprometida,
-        # resetear la clave tiene que expulsar al atacante.
+        # Ends every open session: if the account was compromised, resetting the
+        # password has to lock the attacker out.
         user.token_version += 1
         db.add(user)
         await db.commit()
@@ -224,8 +224,8 @@ class AuthService:
             raise BusinessException("Current password is incorrect")
 
         user.password = hash_password(request.new_password)
-        # Cierra el resto de sesiones; la actual sigue viva porque abajo se le
-        # entregan tokens nuevos ya con el token_version actualizado.
+        # Ends the other sessions; this one survives because it gets new tokens
+        # below, already carrying the new token_version.
         user.token_version += 1
         db.add(user)
         await db.commit()
