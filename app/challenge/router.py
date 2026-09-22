@@ -64,3 +64,18 @@ async def preview_challenge(request: Request, body: JoinChallengeRequest, db: DB
 @limiter.limit("10/minute")
 async def join_challenge(request: Request, body: JoinChallengeRequest, db: DBSession, current_user: CurrentUser):
     return await challenge_service.join(db, current_user, body)
+
+
+@router.post("/{challenge_id}/cancel", response_model=ChallengeResponse)
+async def cancel_challenge(challenge_id: UUID, db: DBSession, current_user: CurrentUser):
+    return await challenge_service.cancel(db, current_user, challenge_id)
+
+
+@router.post("/{challenge_id}/leave", status_code=status.HTTP_204_NO_CONTENT)
+async def leave_challenge(challenge_id: UUID, db: DBSession, current_user: CurrentUser):
+    await challenge_service.leave(db, current_user, challenge_id)
+
+
+@router.delete("/{challenge_id}/members/{user_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def remove_challenge_member(challenge_id: UUID, user_id: UUID, db: DBSession, current_user: CurrentUser):
+    await challenge_service.remove_member(db, current_user, challenge_id, user_id)
