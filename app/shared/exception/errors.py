@@ -18,5 +18,11 @@ class DuplicateResourceException(Exception):
         self.message = message
 
 
+class PermissionDeniedException(Exception):
+    def __init__(self, message: str):
+        super().__init__(message)
+        self.message = message
+
+
 class AuthenticationRequiredException(Exception):
     pass
