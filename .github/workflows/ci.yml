@@ -70,3 +70,12 @@ jobs:
 
       - name: Run tests
         run: uv run pytest
+
+  # Render builds this same Dockerfile; a broken one should fail here, not in a deploy.
+  docker:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Build the production image
+        run: docker build --tag whowins-api:ci .
