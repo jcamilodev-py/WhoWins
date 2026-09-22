@@ -43,6 +43,9 @@ class MemberFacts:
     joined_local_date: date
     # What the late-join policy charged them on the way in.
     inherited_missed_days: int
+    # The first day they are no longer answerable for. The day they leave does
+    # not count: it was still open, and it must not cost the group anything.
+    left_local_date: date | None = None
 
 
 @dataclass(frozen=True)
@@ -96,7 +99,13 @@ def _active_days_in_range(challenge: ChallengeFacts, last_day: date) -> list[dat
 
 
 def _is_answerable(member: MemberFacts, day: date) -> bool:
-    return day >= member.joined_local_date
+    return day >= member.joined_local_date and (member.left_local_date is None or day < member.left_local_date)
+
+
+def _last_lived_day(member: MemberFacts) -> date:
+    if member.left_local_date is None:
+        return member.local_today
+    return member.left_local_date - timedelta(days=1)
 
 
 def _member_outcome(member: MemberFacts, day: date, covered: set[tuple[UUID, date]]) -> DayOutcome:
@@ -141,8 +150,10 @@ def calculate(challenge: ChallengeFacts, members: list[MemberFacts], covered: se
         return StreakResult(current_group_streak=0, best_group_streak=0, members={})
 
     # The calendar runs to the furthest-ahead member: someone in Tokyo is
-    # already living a day their partner in Bogotá has not started.
-    last_day = max(member.local_today for member in members)
+    # already living a day their partner in Bogotá has not started. A member who
+    # left still reaches as far as the days they lived, so leaving never
+    # rewrites a day that had already closed for them.
+    last_day = max(_last_lived_day(member) for member in members)
     if challenge.end_date is not None:
         last_day = min(last_day, challenge.end_date)
     days = _active_days_in_range(challenge, last_day)
