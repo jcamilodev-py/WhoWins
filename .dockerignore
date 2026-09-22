@@ -1,0 +1,17 @@
+.git
+.github
+.venv
+.env
+.env.*
+**/__pycache__
+.pytest_cache
+.mypy_cache
+.ruff_cache
+tests
+scripts
+frontend-handoff
+.agents
+.claude
+CLAUDE.md
+README_ES.md
+docker-compose.yml
