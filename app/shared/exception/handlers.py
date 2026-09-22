@@ -70,8 +70,8 @@ def register_exception_handlers(app: FastAPI) -> None:
 
     @app.exception_handler(Exception)
     async def handle_unexpected_exception(request: Request, exc: Exception):
-        # Se registra entero para poder depurarlo, pero al cliente solo le llega
-        # un mensaje generico: nada de tracebacks ni detalles internos.
+        # Logged in full for debugging; the client only gets a generic message,
+        # never a traceback or internal details.
         logger.exception("Unhandled exception on %s %s", request.method, request.url.path)
         return JSONResponse(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
