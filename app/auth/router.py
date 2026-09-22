@@ -15,7 +15,6 @@ from app.core.database import DBSession
 from app.core.limiter import limiter
 from app.shared.exception.errors import AuthenticationRequiredException
 from app.user.repository import UserRepository
-from app.user.schemas import UserResponse
 
 router = APIRouter(prefix="/api/v1/auth", tags=["auth"])
 
@@ -53,11 +52,6 @@ async def logout(response: Response, db: DBSession, user: CurrentUserOptional) -
     if user:
         await auth_service.logout(db, user)
     auth_service.clear_auth_cookies(response)
-
-
-@router.get("/me", response_model=UserResponse, summary="Authenticated user profile")
-async def get_me(user: CurrentUser):
-    return UserResponse.model_validate(user)
 
 
 @router.post(
