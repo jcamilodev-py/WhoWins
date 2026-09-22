@@ -1,8 +1,10 @@
 import secrets
-from datetime import date, datetime, timedelta
+from collections.abc import Sequence
+from datetime import UTC, date, datetime, timedelta
 from uuid import UUID
 from zoneinfo import ZoneInfo
 
+from sqlalchemy import Row
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -32,8 +34,15 @@ from app.challenge.schemas import (
     MemberHistoryResponse,
     MyChallengeResponse,
 )
-from app.shared.exception.errors import BusinessException, DuplicateResourceException, ResourceNotFoundException
+from app.checkin.service import review_service
+from app.shared.exception.errors import (
+    BusinessException,
+    DuplicateResourceException,
+    PermissionDeniedException,
+    ResourceNotFoundException,
+)
 from app.shared.storage.object_storage import object_storage
+from app.shared.timezones import local_date
 from app.streaks.engine import DayOutcome
 from app.streaks.service import streak_service
 from app.user.models import User
@@ -93,13 +102,21 @@ _OUTCOME_NAMES = {
 }
 
 
-def _history_outcome(day: date, active_days: list[int], member_days: dict[date, DayOutcome]) -> HistoryOutcome:
+def _history_outcome(
+    day: date, active_days: list[int], member_days: dict[date, DayOutcome], left_on: date | None
+) -> HistoryOutcome:
     if day.weekday() not in active_days:
         return HistoryOutcome.REST_DAY
     if day in member_days:
         return _OUTCOME_NAMES[member_days[day]]
+    if left_on is not None and day >= left_on:
+        return HistoryOutcome.LEFT
     # An active day the engine did not hold this member to: it ran before they joined.
     return HistoryOutcome.NOT_JOINED
+
+
+def _is_current_member(rows: Sequence[Row[tuple[ChallengeMember, User]]], user_id: UUID) -> bool:
+    return any(member.user_id == user_id and member.left_at is None for member, _ in rows)
 
 
 class ChallengeService:
@@ -155,7 +172,11 @@ class ChallengeService:
         if challenge is None:
             raise ResourceNotFoundException("Challenge", "invite code", data.invite_code)
 
-        if await self.member_repository.exists_by_challenge_and_user(db, challenge.id, user.id):
+        existing = await self.member_repository.find_by_challenge_and_user(db, challenge.id, user.id)
+        if existing is not None and existing.left_at is not None:
+            # Otherwise leaving on a bad day and joining again would wipe the misses.
+            raise BusinessException("You left this challenge and cannot join it again.")
+        if existing is not None:
             raise DuplicateResourceException("Challenge member", "user id", user.id)
 
         today = _local_today(user)
@@ -202,10 +223,13 @@ class ChallengeService:
         # Checked first, like join: a member opening their own invite link should
         # be sent to the challenge, even if it has finished.
         today = _local_today(user)
-        if await self.member_repository.exists_by_challenge_and_user(db, challenge.id, user.id):
+        membership = await self.member_repository.find_by_challenge_and_user(db, challenge.id, user.id)
+        if membership is None:
+            join_status = _join_status(challenge, today)
+        elif membership.left_at is None:
             join_status = JoinStatus.ALREADY_MEMBER
         else:
-            join_status = _join_status(challenge, today)
+            join_status = JoinStatus.LEFT
 
         return ChallengePreviewResponse(
             id=challenge.id,
@@ -245,22 +269,25 @@ class ChallengeService:
 
     async def get_detail(self, db: AsyncSession, user: User, challenge_id: UUID) -> ChallengeDetailResponse:
         challenge = await self.challenge_repository.find_by_id(db, challenge_id)
-        rows = await self.member_repository.find_leaderboard(db, challenge_id) if challenge else []
+        rows = await self.member_repository.find_members_with_users(db, challenge_id) if challenge else []
 
         # 404 rather than 403 for non-members, so a private challenge's existence
         # is not confirmed to someone who merely has its id.
-        if challenge is None or all(member.user_id != user.id for member, *_ in rows):
+        if challenge is None or not _is_current_member(rows, user.id):
             raise ResourceNotFoundException("Challenge", "id", challenge_id)
 
         # Deduced on read: nothing schedules this, so the only moment the scores
         # can be trusted is the moment someone asks for them.
         result = await streak_service.recalculate(db, challenge)
-        rows = await self.member_repository.find_leaderboard(db, challenge_id)
+        rows = await self.member_repository.find_members_with_users(db, challenge_id)
 
+        # Only those still in compete: someone who left stops collecting misses,
+        # so leaving early would otherwise be a way to top the ranking.
+        competing = [(member, member_user) for member, member_user in rows if member.left_at is None]
         leaderboard: list[LeaderboardEntryResponse] = []
         rank = 0
         previous_missed: int | None = None
-        for position, (member, display_name, avatar_key) in enumerate(rows, start=1):
+        for position, (member, member_user) in enumerate(competing, start=1):
             if member.missed_days_count != previous_missed:
                 rank = position
                 previous_missed = member.missed_days_count
@@ -268,8 +295,8 @@ class ChallengeService:
                 LeaderboardEntryResponse(
                     rank=rank,
                     user_id=member.user_id,
-                    display_name=display_name,
-                    avatar_url=_avatar_url(avatar_key),
+                    display_name=member_user.display_name,
+                    avatar_url=_avatar_url(member_user.avatar_key),
                     role=member.role,
                     current_individual_streak=member.current_individual_streak,
                     best_individual_streak=member.best_individual_streak,
@@ -280,18 +307,17 @@ class ChallengeService:
 
         last_group_break = None
         if result.last_group_break is not None:
-            people = {member.user_id: (display_name, avatar_key) for member, display_name, avatar_key in rows}
+            # Everyone who ever joined: leaving does not undo having broken the streak.
+            people = {member.user_id: member_user for member, member_user in rows}
             last_group_break = GroupBreakResponse(
                 day=result.last_group_break.day,
                 members=[
                     GroupBreakMemberResponse(
                         user_id=user_id,
-                        display_name=people[user_id][0],
-                        avatar_url=_avatar_url(people[user_id][1]),
+                        display_name=people[user_id].display_name,
+                        avatar_url=_avatar_url(people[user_id].avatar_key),
                     )
                     for user_id in result.last_group_break.user_ids
-                    # A member who has since left is no longer anyone's to name.
-                    if user_id in people
                 ],
             )
 
@@ -311,8 +337,8 @@ class ChallengeService:
         growing with it.
         """
         challenge = await self.challenge_repository.find_by_id(db, challenge_id)
-        rows = await self.member_repository.find_leaderboard(db, challenge_id) if challenge else []
-        if challenge is None or all(member.user_id != user.id for member, *_ in rows):
+        rows = await self.member_repository.find_members_with_users(db, challenge_id) if challenge else []
+        if challenge is None or not _is_current_member(rows, user.id):
             raise ResourceNotFoundException("Challenge", "id", challenge_id)
 
         result = await streak_service.recalculate(db, challenge)
@@ -322,24 +348,94 @@ class ChallengeService:
             first_day = max(challenge.start_date, result.last_day - timedelta(days=days - 1))
             dates = [first_day + timedelta(days=offset) for offset in range((result.last_day - first_day).days + 1)]
 
+        members: list[MemberHistoryResponse] = []
         # Join order, not ranking order: a heatmap reads better when rows do not
         # jump around as the scores change.
-        members_by_join = sorted(rows, key=lambda row: (row[0].joined_at, row[0].id))
-        return ChallengeHistoryResponse(
-            challenge_id=challenge_id,
-            dates=dates,
-            members=[
+        for member, member_user in sorted(rows, key=lambda row: (row[0].joined_at, row[0].id)):
+            left_on = local_date(member.left_at, member_user.timezone) if member.left_at else None
+            if left_on is not None and (not dates or left_on <= dates[0]):
+                continue
+            members.append(
                 MemberHistoryResponse(
                     user_id=member.user_id,
-                    display_name=display_name,
+                    display_name=member_user.display_name,
+                    left_at=member.left_at,
+                    removed=member.removed_by is not None,
                     days=[
                         HistoryDayResponse(
                             day=day,
-                            outcome=_history_outcome(day, challenge.active_days, result.members[member.id].days),
+                            outcome=_history_outcome(
+                                day, challenge.active_days, result.members[member.id].days, left_on
+                            ),
                         )
                         for day in dates
                     ],
                 )
-                for member, display_name, _ in members_by_join
-            ],
+            )
+
+        return ChallengeHistoryResponse(challenge_id=challenge_id, dates=dates, members=members)
+
+    async def cancel(self, db: AsyncSession, user: User, challenge_id: UUID) -> ChallengeResponse:
+        challenge, me = await self._load_membership(db, user, challenge_id)
+        if me.role != MemberRole.CREATOR:
+            raise PermissionDeniedException("Only the creator can cancel the challenge.")
+        await self._require_running(db, challenge)
+
+        challenge.status = ChallengeStatus.CANCELLED
+        challenge.cancelled_at = datetime.now(UTC)
+        db.add(challenge)
+        await db.commit()
+        await db.refresh(challenge)
+
+        return ChallengeResponse.model_validate(challenge)
+
+    async def leave(self, db: AsyncSession, user: User, challenge_id: UUID) -> None:
+        challenge, me = await self._load_membership(db, user, challenge_id)
+        if me.role == MemberRole.CREATOR:
+            raise BusinessException("The creator cannot leave the challenge; cancel it instead.")
+        await self._end_membership(db, challenge, me, removed_by=None)
+
+    async def remove_member(self, db: AsyncSession, user: User, challenge_id: UUID, member_user_id: UUID) -> None:
+        challenge, me = await self._load_membership(db, user, challenge_id)
+        if me.role != MemberRole.CREATOR:
+            raise PermissionDeniedException("Only the creator can remove members.")
+        if member_user_id == user.id:
+            raise BusinessException("The creator cannot be removed; cancel the challenge instead.")
+
+        member = await self.member_repository.find_by_challenge_and_user(db, challenge_id, member_user_id)
+        if member is None or member.left_at is not None:
+            raise ResourceNotFoundException("Challenge member", "user id", member_user_id)
+        await self._end_membership(db, challenge, member, removed_by=user.id)
+
+    async def _load_membership(
+        self, db: AsyncSession, user: User, challenge_id: UUID
+    ) -> tuple[Challenge, ChallengeMember]:
+        challenge = await self.challenge_repository.find_by_id(db, challenge_id)
+        member = (
+            await self.member_repository.find_by_challenge_and_user(db, challenge_id, user.id) if challenge else None
         )
+        if challenge is None or member is None or member.left_at is not None:
+            raise ResourceNotFoundException("Challenge", "id", challenge_id)
+        return challenge, member
+
+    @staticmethod
+    async def _require_running(db: AsyncSession, challenge: Challenge) -> None:
+        # Refreshed first: the stored status lags behind the calendar between reads.
+        await streak_service.recalculate(db, challenge)
+        if challenge.status in (ChallengeStatus.COMPLETED, ChallengeStatus.CANCELLED):
+            # A finished ranking is final; leaving would change who won.
+            raise BusinessException("This challenge is no longer running.")
+
+    async def _end_membership(
+        self, db: AsyncSession, challenge: Challenge, member: ChallengeMember, removed_by: UUID | None
+    ) -> None:
+        await self._require_running(db, challenge)
+
+        member.left_at = datetime.now(UTC)
+        member.removed_by = removed_by
+        db.add(member)
+        await db.flush()
+        await review_service.redecide_pending(db, challenge.id)
+        await db.commit()
+
+        await streak_service.recalculate(db, challenge)
