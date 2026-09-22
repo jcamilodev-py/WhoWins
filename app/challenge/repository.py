@@ -24,7 +24,9 @@ class ChallengeRepository(BaseRepository[Challenge]):
     ) -> Row[tuple[Challenge, int, str | None]] | None:
         """The challenge with its member count and its creator's display name."""
         member_count = (
-            select(func.count(ChallengeMember.id)).where(ChallengeMember.challenge_id == Challenge.id).scalar_subquery()
+            select(func.count(ChallengeMember.id))
+            .where(ChallengeMember.challenge_id == Challenge.id, ChallengeMember.left_at.is_(None))
+            .scalar_subquery()
         )
         result = await db.execute(
             select(Challenge, member_count, User.display_name)
@@ -44,12 +46,16 @@ class ChallengeRepository(BaseRepository[Challenge]):
         # A separate alias: the outer ChallengeMember is the user's own row, while
         # the count has to see every member of the challenge.
         counted = aliased(ChallengeMember)
-        member_count = select(func.count(counted.id)).where(counted.challenge_id == Challenge.id).scalar_subquery()
+        member_count = (
+            select(func.count(counted.id))
+            .where(counted.challenge_id == Challenge.id, counted.left_at.is_(None))
+            .scalar_subquery()
+        )
 
         result = await db.execute(
             select(Challenge, ChallengeMember, member_count)
             .join(ChallengeMember, ChallengeMember.challenge_id == Challenge.id)
-            .where(ChallengeMember.user_id == user_id)
+            .where(ChallengeMember.user_id == user_id, ChallengeMember.left_at.is_(None))
             .order_by(ChallengeMember.joined_at.desc(), Challenge.id.desc())
         )
         return result.all()
@@ -62,13 +68,23 @@ class ChallengeMemberRepository(BaseRepository[ChallengeMember]):
         )
         return bool(result.scalar())
 
-    async def find_leaderboard(
+    async def find_by_challenge_and_user(
+        self, db: AsyncSession, challenge_id: UUID, user_id: UUID
+    ) -> ChallengeMember | None:
+        result = await db.execute(
+            select(ChallengeMember).where(
+                ChallengeMember.challenge_id == challenge_id, ChallengeMember.user_id == user_id
+            )
+        )
+        return result.scalar_one_or_none()
+
+    async def find_members_with_users(
         self, db: AsyncSession, challenge_id: UUID
-    ) -> Sequence[Row[tuple[ChallengeMember, str | None, str | None]]]:
-        """Each member with their display name and photo key, fewest missed days first."""
+    ) -> Sequence[Row[tuple[ChallengeMember, User]]]:
+        """Everyone who ever joined, including those who left, fewest missed days first."""
         # Ties stay in join order until a tie-breaker is defined.
         result = await db.execute(
-            select(ChallengeMember, User.display_name, User.avatar_key)
+            select(ChallengeMember, User)
             .join(User, User.id == ChallengeMember.user_id)
             .where(ChallengeMember.challenge_id == challenge_id)
             .order_by(
