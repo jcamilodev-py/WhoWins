@@ -72,9 +72,15 @@ class CheckInReviewRepository(BaseRepository[CheckInReview]):
         )
         return result.scalar_one_or_none()
 
-    async def count_votes(self, db: AsyncSession, check_in_ids: list[UUID]) -> dict[UUID, tuple[int, int]]:
-        """Approvals and rejections per proof, in one query for the whole queue."""
-        if not check_in_ids:
+    async def count_votes(
+        self, db: AsyncSession, check_in_ids: list[UUID], reviewer_ids: set[UUID]
+    ) -> dict[UUID, tuple[int, int]]:
+        """Approvals and rejections per proof, in one query for the whole queue.
+
+        Only the votes of `reviewer_ids` are counted: a member who left no longer
+        has a say, and the majority is taken over the members still in.
+        """
+        if not check_in_ids or not reviewer_ids:
             return {}
         result = await db.execute(
             select(
@@ -82,7 +88,7 @@ class CheckInReviewRepository(BaseRepository[CheckInReview]):
                 func.count().filter(CheckInReview.is_approved.is_(True)),
                 func.count().filter(CheckInReview.is_approved.is_(False)),
             )
-            .where(CheckInReview.check_in_id.in_(check_in_ids))
+            .where(CheckInReview.check_in_id.in_(check_in_ids), CheckInReview.reviewer_id.in_(reviewer_ids))
             .group_by(CheckInReview.check_in_id)
         )
         return {check_in_id: (approvals, rejections) for check_in_id, approvals, rejections in result.all()}
@@ -105,7 +111,7 @@ class ChallengeMemberWithUserRepository(BaseRepository[ChallengeMember]):
     async def find_members_with_users(
         self, db: AsyncSession, challenge_id: UUID
     ) -> Sequence[Row[tuple[ChallengeMember, User]]]:
-        """Members with the user rows the day view needs: name and timezone."""
+        """Everyone who ever joined, including those who left, with name and timezone."""
         result = await db.execute(
             select(ChallengeMember, User)
             .join(User, User.id == ChallengeMember.user_id)
