@@ -204,6 +204,8 @@ The browser uploads photos **straight to the bucket** with a presigned PUT, from
 [{"AllowedOrigins": ["https://app.example.com"], "AllowedMethods": ["PUT", "GET"], "AllowedHeaders": ["content-type"]}]
 ```
 
+`AllowedOrigins` is the frontend's URL, the page the upload starts from.
+
 ---
 
 ## 🚀 Local Development Setup
@@ -243,12 +245,69 @@ uv run python scripts/create_admin.py --email admin@whowins.local --password Adm
 ```bash
 uv run uvicorn app.main:app --reload
 ```
-Interactive Swagger documentation will be available at: `http://localhost:8000/docs`
+Interactive Swagger documentation will be available at: `http://localhost:8000/docs` (development only: any other `ENV` hides it)
 
 ### 6. Run Test Suite
 ```bash
 uv run pytest
 ```
+
+---
+
+## ☁️ Deploying to Render
+
+The repository ships a `Dockerfile` and a Blueprint (`render.yaml`) for the API and its Postgres database, both on the free plan. The frontend is deployed separately, as a Render Static Site.
+
+### How the pieces fit
+
+```
+browser ──> frontend static site (e.g. https://whowins.onrender.com)
+              ├── /api/*, /oauth2/*, /login/oauth2/*  ── rewrite ──> API (https://whowins-api.onrender.com)
+              └── everything else                      ──> the SPA
+browser ──> bucket (e.g. Cloudflare R2), directly, for photos
+```
+
+`onrender.com` is on the [Public Suffix List](https://publicsuffix.org/), so two `*.onrender.com` services are two different **sites**, and the `SameSite=Lax` session cookies never travel from one to the other. The frontend therefore proxies the API with rewrite rules: the browser only ever talks to one origin, and the cookies stay first-party. With a custom domain later (`app.` and `api.` under one domain), the proxy becomes optional.
+
+### Steps
+
+1. **Bucket.** Render has no object storage, so photos need an S3-compatible bucket elsewhere. Cloudflare R2's free tier fits: create a bucket and an API token with object read and write access, then add the CORS rule from [Object storage in production](#object-storage-in-production) with the frontend's URL. The endpoint is `https://<account-id>.r2.cloudflarestorage.com` and the region `auto`.
+2. **Google.** In the Google Cloud console, add `https://<frontend>/login/oauth2/code/google` as an authorized redirect URI. It is the frontend's address, not the API's: the callback comes back through the proxy.
+3. **Blueprint.** In the Render dashboard, *New → Blueprint*, then pick this repository. Render generates `JWT_SECRET` and `SESSION_SECRET` and wires the `DB_*` values to the database. It asks for the rest:
+
+   | Variable | Value |
+   |---|---|
+   | `FRONTEND_URL`, `CORS_ALLOWED_ORIGINS`, `OAUTH_REDIRECT_BASE_URL` | The frontend's URL, all three the same, e.g. `https://whowins.onrender.com` |
+   | `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` | From the Google Cloud console |
+   | `STORAGE_ENDPOINT_URL`, `STORAGE_ACCESS_KEY`, `STORAGE_SECRET_KEY`, `STORAGE_BUCKET`, `STORAGE_REGION` | From the bucket (`auto` is R2's region) |
+
+4. **Frontend.** Create a Static Site from the frontend repository, built with `VITE_API_URL` **empty** so it calls its own origin. Add these rewrite rules, in this order:
+
+   | Source | Destination | Action |
+   |---|---|---|
+   | `/api/*` | `https://whowins-api.onrender.com/api/*` | Rewrite |
+   | `/oauth2/*` | `https://whowins-api.onrender.com/oauth2/*` | Rewrite |
+   | `/login/oauth2/*` | `https://whowins-api.onrender.com/login/oauth2/*` | Rewrite |
+   | `/*` | `/index.html` | Rewrite |
+
+5. **Check.** `https://whowins-api.onrender.com/health` answers `{"status": "ok"}`. Then log in through the frontend and open a page that needs the session. Render documents that a rewrite can target another URL, but not how it treats cookies: if the login succeeds and the next request is a 401, the proxy is dropping them, and the way out is a custom domain or a small proxy service in front of the frontend.
+
+### What the service does on its own
+
+- Runs the migrations on every start, because Render's pre-deploy command is only available on paid instances. Then it serves on `$PORT`.
+- Refuses to start with `ENV=production` while any value is still a development default, and lists every one of them in the deploy log.
+- Hides `/docs` and `/openapi.json`.
+- Trusts the proxy's `X-Forwarded-*` headers, so the rate limits count each client rather than Render's proxy.
+- Runs a single process, because the rate limits live in its memory. More than one instance needs `RATE_LIMIT_STORAGE_URI` pointing to Redis.
+- Deploys only commits whose GitHub checks passed (`autoDeployTrigger: checksPass`). CI builds the same Docker image.
+
+### Free plan limits
+
+| Limit | Consequence | Way out |
+|---|---|---|
+| The service sleeps after 15 minutes without traffic | The first request afterwards takes about a minute | A paid instance |
+| Free Postgres **expires 30 days** after creation | The data is deleted after a 14-day grace period | Upgrade the database, or use an external free Postgres such as Neon: set the `DB_*` variables by hand, with `DB_SSL=true` |
+| Outbound SMTP (ports 25, 465 and 587) is blocked | Password reset emails are never sent | A paid instance, or an email provider with an HTTP API (not built yet) |
 
 ---
 
