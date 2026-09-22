@@ -4,7 +4,7 @@ from fastapi import APIRouter, Request, status
 
 from app.auth.dependencies import CurrentUser
 from app.challenge.repository import ChallengeRepository
-from app.checkin.repository import ChallengeMemberWithUserRepository, CheckInRepository, CheckInReviewRepository
+from app.checkin.repository import ChallengeMemberWithUserRepository, CheckInRepository
 from app.checkin.schemas import (
     CheckInConfirmRequest,
     CheckInResponse,
@@ -14,16 +14,13 @@ from app.checkin.schemas import (
     ReviewVoteRequest,
     TodayStatusResponse,
 )
-from app.checkin.service import CheckInReviewService, CheckInService
+from app.checkin.service import CheckInService, review_service
 from app.core.database import DBSession
 from app.core.limiter import limiter
 
 router = APIRouter(prefix="/api/v1/challenges/{challenge_id}/checkins", tags=["check-ins"])
 
 check_in_service = CheckInService(ChallengeRepository(), ChallengeMemberWithUserRepository(), CheckInRepository())
-review_service = CheckInReviewService(
-    ChallengeRepository(), ChallengeMemberWithUserRepository(), CheckInRepository(), CheckInReviewRepository()
-)
 
 
 @router.post("/upload-url", response_model=CheckInUploadResponse)
