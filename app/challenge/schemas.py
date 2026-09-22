@@ -63,6 +63,7 @@ class ChallengeResponse(BaseModel):
     status: ChallengeStatus
     current_group_streak: int
     best_group_streak: int
+    cancelled_at: datetime | None
     created_by: UUID
     created_at: datetime
     updated_at: datetime
@@ -143,6 +144,8 @@ class HistoryOutcome(StrEnum):
     REST_DAY = "REST_DAY"
     # An active day that ran before this member joined; nothing was owed.
     NOT_JOINED = "NOT_JOINED"
+    # An active day from the day this member left onwards.
+    LEFT = "LEFT"
 
 
 class HistoryDayResponse(BaseModel):
@@ -157,6 +160,10 @@ class MemberHistoryResponse(BaseModel):
 
     user_id: UUID
     display_name: str | None
+    # Null while they are still in the challenge.
+    left_at: datetime | None
+    # True when the creator removed them, false when they left on their own.
+    removed: bool
     days: list[HistoryDayResponse]
 
 
@@ -176,6 +183,8 @@ class JoinStatus(StrEnum):
     CLOSED = "CLOSED"
     # Completed, cancelled, or past its end date.
     FINISHED = "FINISHED"
+    # The caller was in it and left or was removed; there is no way back in.
+    LEFT = "LEFT"
 
 
 class ChallengePreviewResponse(BaseModel):
