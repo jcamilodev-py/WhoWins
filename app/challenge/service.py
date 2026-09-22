@@ -140,32 +140,43 @@ class ChallengeService:
 
         total_days = DURATION_DAYS[data.duration_type]
         end_date = data.start_date + timedelta(days=total_days - 1) if total_days is not None else None
+        # A plain value: the rollback below expires the user row.
+        user_id = user.id
 
-        challenge = Challenge(
-            title=data.title,
-            description=data.description,
-            invite_code=await self._generate_invite_code(db),
-            visibility=data.visibility,
-            duration_type=data.duration_type,
-            total_days=total_days,
-            start_date=data.start_date,
-            end_date=end_date,
-            active_days=data.active_days,
-            requires_approval=data.requires_approval,
-            late_join_policy=data.late_join_policy,
-            status=ChallengeStatus.ACTIVE if data.start_date == today else ChallengeStatus.PENDING,
-            created_by=user.id,
-        )
-        db.add(challenge)
-        # Flush assigns the id the membership row needs without committing, so the
-        # challenge and its creator are saved together or not at all.
-        await db.flush()
+        for _ in range(INVITE_CODE_MAX_ATTEMPTS):
+            challenge = Challenge(
+                title=data.title,
+                description=data.description,
+                invite_code=await self._generate_invite_code(db),
+                visibility=data.visibility,
+                duration_type=data.duration_type,
+                total_days=total_days,
+                start_date=data.start_date,
+                end_date=end_date,
+                active_days=data.active_days,
+                requires_approval=data.requires_approval,
+                late_join_policy=data.late_join_policy,
+                status=ChallengeStatus.ACTIVE if data.start_date == today else ChallengeStatus.PENDING,
+                created_by=user_id,
+            )
+            db.add(challenge)
+            try:
+                # Flush assigns the id the membership row needs without committing, so
+                # the challenge and its creator are saved together or not at all.
+                await db.flush()
+                db.add(ChallengeMember(challenge_id=challenge.id, user_id=user_id, role=MemberRole.CREATOR))
+                await db.commit()
+            except IntegrityError as exc:
+                await db.rollback()
+                # Another challenge took the same code between the check and the insert.
+                if "invite_code" not in str(exc.orig):
+                    raise
+                continue
 
-        db.add(ChallengeMember(challenge_id=challenge.id, user_id=user.id, role=MemberRole.CREATOR))
-        await db.commit()
-        await db.refresh(challenge)
+            await db.refresh(challenge)
+            return ChallengeResponse.model_validate(challenge)
 
-        return ChallengeResponse.model_validate(challenge)
+        raise BusinessException("Could not generate a unique invite code, please try again.")
 
     async def join(self, db: AsyncSession, user: User, data: JoinChallengeRequest) -> ChallengeResponse:
         challenge = await self.challenge_repository.find_by_invite_code(db, data.invite_code)
