@@ -31,10 +31,18 @@ def _login_error_redirect(reason: str) -> RedirectResponse:
     return RedirectResponse(f"{settings.frontend_url}/login?{query}")
 
 
+def _google_redirect_uri(request: Request) -> str:
+    # Behind the frontend's proxy the callback must come back through it too:
+    # that is where the OAuth state cookie was set, and where the session
+    # cookies have to land.
+    if settings.oauth_redirect_base_url:
+        return settings.oauth_redirect_base_url.rstrip("/") + request.app.url_path_for("google_callback")
+    return str(request.url_for("google_callback"))
+
+
 @router.get("/oauth2/authorization/google")
 async def google_authorize(request: Request):
-    redirect_uri = request.url_for("google_callback")
-    return await oauth.google.authorize_redirect(request, redirect_uri)
+    return await oauth.google.authorize_redirect(request, _google_redirect_uri(request))
 
 
 @router.get("/login/oauth2/code/google", name="google_callback")
