@@ -52,8 +52,8 @@ async def google_callback(request: Request, db: DBSession):
     if not email or not google_id:
         return _login_error_redirect("oauth_failed")
 
-    # Sin esta comprobacion, una cuenta de Google con un email sin verificar
-    # podria vincularse a una cuenta local existente y apropiarsela.
+    # Without this, a Google account with an unverified email could be linked
+    # to an existing local account and take it over.
     if not userinfo.get("email_verified"):
         return _login_error_redirect("email_not_verified")
 
