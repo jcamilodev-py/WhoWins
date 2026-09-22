@@ -48,6 +48,10 @@ def _photo_prefix(challenge_id: UUID, user_id: UUID) -> str:
     return f"challenges/{challenge_id}/checkins/{user_id}/"
 
 
+def _current_user_ids(rows: Sequence[Row[tuple[ChallengeMember, User]]]) -> set[UUID]:
+    return {member.user_id for member, _ in rows if member.left_at is None}
+
+
 async def _load_for_member(
     db: AsyncSession,
     user: User,
@@ -55,12 +59,12 @@ async def _load_for_member(
     challenge_repository: ChallengeRepository,
     member_repository: ChallengeMemberWithUserRepository,
 ) -> tuple[Challenge, Sequence[Row[tuple[ChallengeMember, User]]]]:
-    """The challenge and its members, or a 404 when the caller is not one of them."""
+    """The challenge and everyone who ever joined it, or a 404 unless the caller is still in."""
     challenge = await challenge_repository.find_by_id(db, challenge_id)
     rows = await member_repository.find_members_with_users(db, challenge_id) if challenge else []
     # 404 rather than 403, exactly as the challenge detail does: a non-member
     # must not be able to confirm that a challenge exists.
-    if challenge is None or all(member.user_id != user.id for member, _ in rows):
+    if challenge is None or user.id not in _current_user_ids(rows):
         raise ResourceNotFoundException("Challenge", "id", challenge_id)
     return challenge, rows
 
@@ -152,8 +156,10 @@ class CheckInService:
         return self._to_response(check_in)
 
     async def get_today(self, db: AsyncSession, user: User, challenge_id: UUID) -> TodayStatusResponse:
-        challenge = await self._load_for_member(db, user, challenge_id)
-        rows = await self.member_repository.find_members_with_users(db, challenge_id)
+        challenge, all_rows = await _load_for_member(
+            db, user, challenge_id, self.challenge_repository, self.member_repository
+        )
+        rows = [row for row in all_rows if row[0].left_at is None]
 
         # Each member is on their own calendar day, so the view asks for every
         # date in play at this instant, not just the viewer's.
@@ -249,18 +255,16 @@ class CheckInReviewService:
 
         rows = await self.check_in_repository.find_pending_with_authors(db, challenge_id)
         check_in_ids = [check_in.id for check_in, _ in rows]
-        tallies = await self.review_repository.count_votes(db, check_in_ids)
+        current = _current_user_ids(member_rows)
+        tallies = await self.review_repository.count_votes(db, check_in_ids, current)
         my_votes = await self.review_repository.find_votes_by_reviewer(db, check_in_ids, user.id)
-        member_count = len(member_rows)
 
         return [
             self._to_response(
                 check_in,
                 author,
                 *tallies.get(check_in.id, (0, 0)),
-                # Everyone but the author may vote. Counted from the members
-                # loaded above rather than per proof: one query, same answer.
-                eligible_reviewers=member_count - 1,
+                eligible_reviewers=len(current - {check_in.user_id}),
                 my_vote=my_votes.get(check_in.id),
             )
             for check_in, author in rows
@@ -286,8 +290,10 @@ class CheckInReviewService:
 
         await self._cast_vote(db, check_in_id, user.id, data)
 
-        approvals, rejections = (await self.review_repository.count_votes(db, [check_in_id])).get(check_in_id, (0, 0))
-        eligible_reviewers = len(member_rows) - 1
+        current = _current_user_ids(member_rows)
+        tallies = await self.review_repository.count_votes(db, [check_in_id], current)
+        approvals, rejections = tallies.get(check_in_id, (0, 0))
+        eligible_reviewers = len(current - {check_in.user_id})
         decision = decide(approvals, rejections, eligible_reviewers)
         if decision is not None:
             check_in.status = decision
@@ -310,6 +316,28 @@ class CheckInReviewService:
             eligible_reviewers=eligible_reviewers,
             my_vote=data.is_approved,
         )
+
+    async def redecide_pending(self, db: AsyncSession, challenge_id: UUID) -> None:
+        """Applies the majority rule again after someone left. The caller commits.
+
+        Leaving changes who may vote, so a proof can be decided by the departure
+        alone: a rejection that was one vote short may now be the majority.
+        """
+        now = datetime.now(UTC)
+        # Settled first: a window that already closed approved its proof, and the
+        # departure must not turn that silence into a rejection.
+        await self.check_in_repository.settle_expired_reviews(db, challenge_id, now)
+
+        current = _current_user_ids(await self.member_repository.find_members_with_users(db, challenge_id))
+        pending = await self.check_in_repository.find_pending_with_authors(db, challenge_id)
+        tallies = await self.review_repository.count_votes(db, [check_in.id for check_in, _ in pending], current)
+
+        for check_in, _ in pending:
+            decision = decide(*tallies.get(check_in.id, (0, 0)), len(current - {check_in.user_id}))
+            if decision is not None:
+                check_in.status = decision
+                check_in.decided_at = now
+                db.add(check_in)
 
     async def _cast_vote(self, db: AsyncSession, check_in_id: UUID, reviewer_id: UUID, data: ReviewVoteRequest) -> None:
         """Records the vote, or replaces the one this reviewer had already cast."""
@@ -368,3 +396,8 @@ class CheckInReviewService:
             eligible_reviewers=eligible_reviewers,
             my_vote=my_vote,
         )
+
+
+review_service = CheckInReviewService(
+    ChallengeRepository(), ChallengeMemberWithUserRepository(), CheckInRepository(), CheckInReviewRepository()
+)
