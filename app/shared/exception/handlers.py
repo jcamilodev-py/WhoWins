@@ -8,6 +8,7 @@ from app.shared.exception.errors import (
     AuthenticationRequiredException,
     BusinessException,
     DuplicateResourceException,
+    PermissionDeniedException,
     ResourceNotFoundException,
 )
 from app.shared.exception.schemas import ErrorResponse
@@ -45,6 +46,13 @@ def register_exception_handlers(app: FastAPI) -> None:
         return JSONResponse(
             status_code=status.HTTP_400_BAD_REQUEST,
             content=_error_body(status.HTTP_400_BAD_REQUEST, "Bad Request", exc.message, request),
+        )
+
+    @app.exception_handler(PermissionDeniedException)
+    async def handle_permission_denied(request: Request, exc: PermissionDeniedException):
+        return JSONResponse(
+            status_code=status.HTTP_403_FORBIDDEN,
+            content=_error_body(status.HTTP_403_FORBIDDEN, "Forbidden", exc.message, request),
         )
 
     @app.exception_handler(AuthenticationRequiredException)
