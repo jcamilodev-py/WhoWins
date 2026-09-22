@@ -12,6 +12,10 @@ def local_today(timezone: str) -> date:
     return datetime.now(ZoneInfo(timezone)).date()
 
 
+def local_date(instant: datetime, timezone: str) -> date:
+    return instant.astimezone(ZoneInfo(timezone)).date()
+
+
 def start_of_day(day: date, timezone: str) -> datetime:
     """The instant that day begins in that timezone, as an absolute point in time."""
     return datetime.combine(day, time.min, tzinfo=ZoneInfo(timezone))
