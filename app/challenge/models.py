@@ -86,6 +86,10 @@ class Challenge(Base):
     current_group_streak: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     best_group_streak: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
 
+    # The instant the scores froze: the streaks are recomputed on every read, so
+    # they are computed as of this moment instead of now.
+    cancelled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
     created_by: Mapped[UUID] = mapped_column(
         PgUUID(as_uuid=True), ForeignKey("users.id", ondelete="RESTRICT"), nullable=False, index=True
     )
@@ -129,3 +133,10 @@ class ChallengeMember(Base):
     inherited_missed_days: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
 
     joined_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+    # Leaving keeps the row: the days this member lived stay in the history, and
+    # the unique constraint above is what stops them from joining again.
+    left_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+    # Null when the member left on their own.
+    removed_by: Mapped[UUID | None] = mapped_column(PgUUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"))
