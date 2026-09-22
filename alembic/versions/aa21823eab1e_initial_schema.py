@@ -9,6 +9,7 @@ from typing import Sequence, Union
 
 from alembic import op
 import sqlalchemy as sa
+from sqlalchemy.dialects import postgresql
 
 
 # revision identifiers, used by Alembic.
@@ -48,3 +49,9 @@ def downgrade() -> None:
     op.drop_index(op.f('ix_users_email'), table_name='users')
     op.drop_table('users')
     # ### end Alembic commands ###
+
+    # drop_table leaves the native enum types behind, so a later upgrade would
+    # fail with "type already exists". Autogenerate never emits these.
+    bind = op.get_bind()
+    for enum_name in ('authprovider', 'role'):
+        postgresql.ENUM(name=enum_name).drop(bind, checkfirst=True)
