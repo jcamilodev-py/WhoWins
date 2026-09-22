@@ -19,6 +19,7 @@ Every active day, each member must capture and upload real-time photo proof (no 
   - Simple onboarding via auto-generated, shareable invite codes (e.g., `WINS-8K92`).
   - Customizable duration: **10 days**, **20 days**, **30 days**, or **Indefinite**.
   - Blacklist / Rest Days: Define active days (e.g., Monday to Friday), allowing designated rest days without breaking streaks.
+  - **Leaving and cancelling:** members can leave and the creator can remove them. The days they lived stay in the history, and from the day they leave the group streak no longer depends on them. There is no way back in. The creator can also cancel the challenge, which freezes every streak as it stood at that moment.
 
 - 📸 **Camera-Only Check-ins (Zero Gallery Access):**
   - Proof must be captured live from the camera.
@@ -112,6 +113,7 @@ erDiagram
         string status "PENDING | ACTIVE | COMPLETED | CANCELLED"
         int current_group_streak
         int best_group_streak
+        datetime cancelled_at "null unless cancelled"
         uuid created_by FK
         datetime created_at
     }
@@ -125,6 +127,8 @@ erDiagram
         int best_individual_streak
         int missed_days_count
         datetime joined_at
+        datetime left_at "null while still in"
+        uuid removed_by FK "null if they left on their own"
     }
 
     CheckIn {
@@ -177,8 +181,10 @@ erDiagram
 | `GET` | `/api/v1/challenges` | List active challenges for current user |
 | `GET` | `/api/v1/challenges/{id}` | Challenge dashboard: streaks, leaderboard with photos, and who last broke the group streak |
 | `GET` | `/api/v1/challenges/{id}/history` | Day-by-day outcome per member, for the heatmap (`?days=`, 1–366, default 60) |
+| `POST` | `/api/v1/challenges/{id}/leave` | Leave a challenge (any member but the creator; no way back in) |
+| `DELETE` | `/api/v1/challenges/{id}/members/{user_id}` | Remove a member (creator only) |
+| `POST` | `/api/v1/challenges/{id}/cancel` | Cancel a challenge (creator only, irreversible; streaks freeze) |
 | `PATCH` | `/api/v1/challenges/{id}/members/{user_id}/role` | *Planned:* promote/demote members (creator/admin) |
-| `DELETE` | `/api/v1/challenges/{id}/members/{user_id}` | *Planned:* remove member from challenge |
 
 ### Check-ins & Media
 | Method | Endpoint | Description |
@@ -251,11 +257,11 @@ uv run pytest
 - [x] Base User Authentication (Local Argon2 + Google OAuth2 + JWT)
 - [x] Session revocation, token versioning & password reset via email
 - [x] Role-Based Access Control (Admin / User) & Rate Limiting
-- [ ] User Profile & Timezone management (`/api/v1/users/me`)
-- [ ] Challenge & Group Membership module with dynamic invite codes
-- [ ] MinIO / S3 Presigned URL storage integration
-- [ ] Daily Check-in submission & validation engine
-- [ ] Dual Streak Calculator (Group reset + Individual preservation)
+- [x] User Profile & Timezone management (`/api/v1/users/me`)
+- [x] Challenge & Group Membership module with dynamic invite codes
+- [x] MinIO / S3 Presigned URL storage integration
+- [x] Daily Check-in submission & peer review
+- [x] Dual Streak Calculator (Group reset + Individual preservation)
 - [ ] Challenge Completion & Winner determination logic
 - [ ] Victory Photo Collage generator
 - [ ] React + Vite Web Application
