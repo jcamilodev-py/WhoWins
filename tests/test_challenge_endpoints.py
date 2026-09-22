@@ -116,6 +116,46 @@ async def test_create_challenge_starting_today_returns_201_active(client: AsyncC
     assert data["createdBy"] == str(user.id)
 
 
+async def test_create_challenge_retries_when_another_takes_the_same_code(
+    client: AsyncClient, db_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+):
+    user = await _create_user(db_session)
+    taken = await _insert_challenge(db_session, user)
+    headers = await _login(client, user)
+    free_code = f"T-{uuid.uuid4().hex[:10].upper()}"
+    # The first code passed the existence check but was taken before the insert,
+    # as when two creations race for it.
+    codes = iter([taken.invite_code, free_code])
+
+    async def racing_codes(db):
+        return next(codes)
+
+    monkeypatch.setattr(challenge_service, "_generate_invite_code", racing_codes)
+
+    response = await client.post("/api/v1/challenges", json=_create_payload(), headers=headers)
+
+    assert response.status_code == 201
+    assert response.json()["inviteCode"] == free_code
+
+
+async def test_create_challenge_gives_up_after_repeated_code_collisions_returns_400(
+    client: AsyncClient, db_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+):
+    user = await _create_user(db_session)
+    # A plain value: the service's rollback expires every loaded row, this one included.
+    taken_code = (await _insert_challenge(db_session, user)).invite_code
+    headers = await _login(client, user)
+
+    async def always_taken(db):
+        return taken_code
+
+    monkeypatch.setattr(challenge_service, "_generate_invite_code", always_taken)
+
+    response = await client.post("/api/v1/challenges", json=_create_payload(), headers=headers)
+
+    assert response.status_code == 400
+
+
 async def test_create_challenge_with_future_start_is_pending(client: AsyncClient, db_session: AsyncSession):
     user = await _create_user(db_session)
     headers = await _login(client, user)
@@ -260,15 +300,15 @@ async def test_concurrent_join_hitting_unique_constraint_returns_409(
 
     # Reproduces a double tap deterministically: the first membership check reads
     # before the other request's row is visible, so the insert hits the constraint.
-    real_check = challenge_service.member_repository.exists_by_challenge_and_user
+    real_find = challenge_service.member_repository.find_by_challenge_and_user
     calls = 0
 
-    async def stale_then_real_check(*args, **kwargs):
+    async def stale_then_real_find(*args, **kwargs):
         nonlocal calls
         calls += 1
-        return False if calls == 1 else await real_check(*args, **kwargs)
+        return None if calls == 1 else await real_find(*args, **kwargs)
 
-    monkeypatch.setattr(challenge_service.member_repository, "exists_by_challenge_and_user", stale_then_real_check)
+    monkeypatch.setattr(challenge_service.member_repository, "find_by_challenge_and_user", stale_then_real_find)
 
     response = await client.post("/api/v1/challenges/join", json={"inviteCode": invite_code}, headers=headers)
 
