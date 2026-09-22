@@ -1,6 +1,17 @@
 from functools import cached_property
+from typing import Self
+from urllib.parse import urlsplit
 
+from pydantic import model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+from sqlalchemy import URL
+
+LOCAL_HOSTS = frozenset({"localhost", "127.0.0.1", "0.0.0.0", "::1"})
+DEFAULT_PASSWORDS = frozenset({"", "postgres", "changeme", "minioadmin"})
+
+
+def _is_local(url: str) -> bool:
+    return urlsplit(url).hostname in LOCAL_HOSTS
 
 
 class Settings(BaseSettings):
@@ -13,9 +24,17 @@ class Settings(BaseSettings):
     db_name: str = "whowins"
     db_user: str = "postgres"
     db_password: str = "postgres"
+    # Databases reached over the internet (Neon, Supabase, Render's external
+    # URL) only accept encrypted connections; a private network does not need it.
+    db_ssl: bool = False
 
     google_client_id: str = ""
     google_client_secret: str = ""
+    # Where Google sends the user back. Unset, it is derived from the request,
+    # which is right when the browser talks to the API directly. Behind the
+    # frontend's proxy the request arrives with the API's own host, so the
+    # public address has to be given explicitly.
+    oauth_redirect_base_url: str | None = None
 
     # Feeds MAIL_FROM, which validates as a real address: empty values and
     # reserved TLDs like .local both fail at import time.
@@ -66,7 +85,17 @@ class Settings(BaseSettings):
 
     @property
     def database_url(self) -> str:
-        return f"postgresql+asyncpg://{self.db_user}:{self.db_password}@{self.db_host}:{self.db_port}/{self.db_name}"
+        # Built, not formatted: a generated password containing "@" or "/" would
+        # otherwise corrupt the URL.
+        return URL.create(
+            "postgresql+asyncpg",
+            username=self.db_user,
+            password=self.db_password,
+            host=self.db_host,
+            port=self.db_port,
+            database=self.db_name,
+            query={"ssl": "require"} if self.db_ssl else {},
+        ).render_as_string(hide_password=False)
 
     @property
     def is_dev(self) -> bool:
@@ -87,6 +116,31 @@ class Settings(BaseSettings):
     @property
     def session_signing_key(self) -> str:
         return self.session_secret or self.jwt_secret
+
+    @model_validator(mode="after")
+    def _refuse_unsafe_production_values(self) -> Self:
+        """Fails the deploy instead of running production on development defaults.
+
+        Every default below works locally, and a missing variable would otherwise
+        go unnoticed until the first request that needs it.
+        """
+        if self.is_dev:
+            return self
+        checks = [
+            (len(self.jwt_secret) < 32, "JWT_SECRET must be at least 32 characters"),
+            (self.db_password in DEFAULT_PASSWORDS, "DB_PASSWORD is a development default"),
+            (
+                self.storage_access_key in DEFAULT_PASSWORDS or self.storage_secret_key in DEFAULT_PASSWORDS,
+                "STORAGE_ACCESS_KEY and STORAGE_SECRET_KEY are development defaults",
+            ),
+            (_is_local(self.storage_endpoint_url), "STORAGE_ENDPOINT_URL points to this machine"),
+            (_is_local(self.frontend_url), "FRONTEND_URL points to this machine"),
+            (any(_is_local(origin) for origin in self.cors_origins), "CORS_ALLOWED_ORIGINS allows this machine"),
+        ]
+        problems = [message for failed, message in checks if failed]
+        if problems:
+            raise ValueError("Refusing to start in production: " + "; ".join(problems))
+        return self
 
 
 # Required fields are loaded from the environment at runtime (pydantic-settings),
