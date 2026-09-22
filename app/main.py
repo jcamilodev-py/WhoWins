@@ -1,3 +1,5 @@
+import logging
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from slowapi import _rate_limit_exceeded_handler
@@ -8,12 +10,31 @@ from app.auth.oauth2_router import router as oauth2_router
 from app.auth.router import router as auth_router
 from app.challenge.router import router as challenge_router
 from app.checkin.router import router as check_in_router
+from app.core.health import router as health_router
 from app.core.limiter import limiter
 from app.core.settings import settings
 from app.shared.exception.handlers import register_exception_handlers
 from app.user.router import router as user_router
 
-app = FastAPI(title="whowins", version="1.0", description="whowins")
+# In production the schema would hand anyone a map of every endpoint. The
+# frontend generates its types from a local server instead.
+app = FastAPI(
+    title="whowins",
+    version="1.0",
+    description="whowins",
+    docs_url="/docs" if settings.is_dev else None,
+    redoc_url="/redoc" if settings.is_dev else None,
+    openapi_url="/openapi.json" if settings.is_dev else None,
+)
+
+
+class _WithoutHealthChecks(logging.Filter):
+    # The platform polls /health every few seconds; those lines would bury the real traffic.
+    def filter(self, record: logging.LogRecord) -> bool:
+        return " /health HTTP/" not in record.getMessage()
+
+
+logging.getLogger("uvicorn.access").addFilter(_WithoutHealthChecks())
 
 app.state.limiter = limiter
 # slowapi's handler predates Starlette's typed exception-handler signature.
@@ -40,6 +61,7 @@ app.add_middleware(
 
 register_exception_handlers(app)
 
+app.include_router(health_router)
 app.include_router(user_router)
 app.include_router(oauth2_router)
 app.include_router(auth_router)
