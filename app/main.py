@@ -20,8 +20,8 @@ app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)  # type: ignore[arg-type]
 
 
-# authlib guarda el "state" del flujo OAuth en request.session, asi que este
-# middleware es obligatorio para que el login con Google funcione.
+# authlib keeps the OAuth "state" in request.session, so Google login needs
+# this middleware.
 app.add_middleware(
     SessionMiddleware,
     secret_key=settings.session_signing_key,
