@@ -20,7 +20,7 @@ EVERY_DAY = list(range(7))
 WEEKDAYS = [0, 1, 2, 3, 4]
 
 
-def _member(local_today: date, joined: date = MONDAY, inherited: int = 0) -> MemberFacts:
+def _member(local_today: date, joined: date = MONDAY, inherited: int = 0, left: date | None = None) -> MemberFacts:
     identifier = uuid.uuid4()
     return MemberFacts(
         member_id=identifier,
@@ -28,6 +28,7 @@ def _member(local_today: date, joined: date = MONDAY, inherited: int = 0) -> Mem
         local_today=local_today,
         joined_local_date=joined,
         inherited_missed_days=inherited,
+        left_local_date=left,
     )
 
 
@@ -274,3 +275,65 @@ def test_each_member_carries_the_outcome_of_every_day_they_answered_for():
         TUESDAY: DayOutcome.COVERED,
         WEDNESDAY: DayOutcome.UNDECIDED,
     }
+
+
+# --- leaving ---
+
+
+def test_a_member_is_not_charged_from_the_day_they_leave():
+    bob = _member(local_today=FRIDAY, left=WEDNESDAY)
+
+    result = calculate(_challenge(), [bob], _covered((bob, MONDAY)))
+
+    assert result.members[bob.member_id].missed_days_count == 1
+    assert result.members[bob.member_id].days == {MONDAY: DayOutcome.COVERED, TUESDAY: DayOutcome.MISSED}
+
+
+def test_the_group_streak_stops_depending_on_a_member_who_left():
+    ana = _member(local_today=FRIDAY)
+    bob = _member(local_today=FRIDAY, left=WEDNESDAY)
+    covered = _covered(
+        (ana, MONDAY), (ana, TUESDAY), (ana, WEDNESDAY), (ana, THURSDAY), (ana, FRIDAY), (bob, MONDAY), (bob, TUESDAY)
+    )
+
+    result = calculate(_challenge(), [ana, bob], covered)
+
+    assert result.current_group_streak == 5
+
+
+def test_the_day_a_member_leaves_does_not_hold_the_group_back():
+    ana = _member(local_today=TUESDAY)
+    bob = _member(local_today=TUESDAY, left=TUESDAY)
+    covered = _covered((ana, MONDAY), (bob, MONDAY), (ana, TUESDAY))
+
+    result = calculate(_challenge(), [ana, bob], covered)
+
+    assert result.current_group_streak == 2
+
+
+def test_leaving_does_not_undo_a_break_the_member_already_caused():
+    ana = _member(local_today=THURSDAY)
+    bob = _member(local_today=THURSDAY, left=WEDNESDAY)
+    covered = _covered((ana, MONDAY), (bob, MONDAY), (ana, TUESDAY), (ana, WEDNESDAY), (ana, THURSDAY))
+
+    result = calculate(_challenge(), [ana, bob], covered)
+
+    assert result.current_group_streak == 2
+    assert result.last_group_break is not None
+    assert result.last_group_break.day == TUESDAY
+    assert result.last_group_break.user_ids == [bob.user_id]
+
+
+def test_a_member_who_left_still_reaches_the_days_they_lived():
+    # Bob is a day ahead of Ana: he lived through Friday, missed it, and left on
+    # his Saturday while Ana is still on Thursday.
+    ana = _member(local_today=THURSDAY)
+    bob = _member(local_today=SATURDAY, left=SATURDAY)
+    covered = _covered(*((member, day) for member in (ana, bob) for day in (MONDAY, TUESDAY, WEDNESDAY, THURSDAY)))
+
+    result = calculate(_challenge(), [ana, bob], covered)
+
+    assert result.last_day == FRIDAY
+    assert result.current_group_streak == 0
+    assert result.last_group_break is not None
+    assert result.last_group_break.day == FRIDAY
