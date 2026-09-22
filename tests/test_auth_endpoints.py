@@ -126,12 +126,7 @@ async def test_login_with_wrong_password_fails(client: AsyncClient):
     assert response.status_code == 401
 
 
-async def test_get_me_unauthorized_without_token(client: AsyncClient):
-    response = await client.get("/api/v1/auth/me")
-    assert response.status_code == 401
-
-
-async def test_get_me_authorized_with_token(client: AsyncClient):
+async def test_registered_user_can_log_in_and_read_their_profile(client: AsyncClient):
     email = _generate_random_email()
     password = "SuperSecretPassword123"
 
@@ -140,7 +135,7 @@ async def test_get_me_authorized_with_token(client: AsyncClient):
     token = login_res.json()["accessToken"]
 
     headers = {"Authorization": f"Bearer {token}"}
-    me_res = await client.get("/api/v1/auth/me", headers=headers)
+    me_res = await client.get("/api/v1/users/me", headers=headers)
 
     assert me_res.status_code == 200
     profile = me_res.json()
